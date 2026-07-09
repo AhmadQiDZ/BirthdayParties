@@ -1,0 +1,31 @@
+{
+  "Nav": {
+    "home": "Home",
+    "about": "About Us",
+    "addPackage": "List Your Venue",
+    "contact": "Contact Us",
+    "faq": "FAQ"
+  },
+  "Hero": {
+    "title": "Book Your Child's Birthday Party with One Click",
+    "subtitle": "Best Birthday Party Venues in Saudi Arabia & UAE",
+    "title2": "50+ Amazing Venues",
+    "subtitle2": "Choose the perfect place for your child's party",
+    "title3": "Easy & Secure Booking",
+    "subtitle3": "Customer support available 7 days a week",
+    "bookNow": "Book Now"
+  },
+  "Common": {
+    "startingFrom": "Starting from",
+    "viewDetails": "View Details",
+    "search": "Search for venue...",
+    "allCities": "All Cities",
+    "sar": "SAR"
+  },
+  "Cities": {
+    "riyadh": "Riyadh",
+    "jeddah": "Jeddah",
+    "dubai": "Dubai",
+    "abu-dhabi": "Abu Dhabi"
+  }
+}
