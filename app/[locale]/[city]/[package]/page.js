@@ -1,4 +1,5 @@
 'use client';
+
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
@@ -8,7 +9,7 @@ import {
   ChevronRight, CheckCircle, ArrowLeft, Star, Clock, Award, 
   Info, Shield, Gift, Sparkles, Crown, Tag, Percent, FileText,
   Heart, Share2, Building, X, ZoomIn, ZoomOut, Download,
-  ExternalLink, MessageCircle, ThumbsUp, Eye
+  ExternalLink, MessageCircle, ThumbsUp, Eye, ChevronDown, HelpCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import WhatsAppPopup from '@/components/ui/WhatsAppPopup';
@@ -87,6 +88,9 @@ export default function PackageDetailPage() {
   const [touchEnd, setTouchEnd] = useState(0);
   const [imageLoading, setImageLoading] = useState(true);
   const modalRef = useRef(null);
+  
+  // ===== ✅ حالة الأسئلة الشائعة =====
+  const [openFaqIndex, setOpenFaqIndex] = useState(null);
   
   const [formData, setFormData] = useState({
     customer_name: '',
@@ -297,6 +301,7 @@ export default function PackageDetailPage() {
     setIsZoomed(false);
     setSubmitted(false);
     setBookingError('');
+    setOpenFaqIndex(null);
 
     try {
       if (!citySlug || citySlug === 'undefined' || citySlug === 'null') {
@@ -586,31 +591,6 @@ export default function PackageDetailPage() {
         setSimilarPackages(similar);
       }
     }
-    
-    updateSEOMetadata(pkg, cityData);
-  }
-
-  // ============================================
-  // تحسين SEO
-  // ============================================
-  function updateSEOMetadata(data, city) {
-    const cityName = locale === 'ar' ? city?.name_ar : city?.name_en;
-    const venueName = locale === 'ar' ? data.venue_name_ar : data.venue_name_en;
-    const description = locale === 'ar' ? data.description_ar : data.description_en;
-    
-    document.title = `${venueName} | ${cityName || 'أفضل الأماكن'} | theQapp`;
-    
-    const metaDescription = document.querySelector('meta[name="description"]');
-    if (metaDescription) {
-      metaDescription.content = description?.replace(/<[^>]*>/g, '').slice(0, 160) || '';
-    }
-    
-    const metaKeywords = document.querySelector('meta[name="keywords"]');
-    if (metaKeywords) {
-      metaKeywords.content = locale === 'ar'
-        ? (data.seo_keywords_ar || `${venueName}, ${cityName}, حجوزات أطفال, أماكن ترفيهية`)
-        : (data.seo_keywords_en || `${venueName}, ${cityName}, children bookings, entertainment venues`);
-    }
   }
 
   // ============================================
@@ -785,6 +765,17 @@ export default function PackageDetailPage() {
   const embedUrl = convertToEmbedUrl(mapUrl);
   const currencySymbol = getCurrencySymbol(packageData?.currency || 'SAR');
 
+  // ===== ✅ الحصول على بيانات الأسئلة الشائعة حسب اللغة =====
+  const faqData = locale === 'ar' 
+    ? (packageData?.faq_ar || []) 
+    : (packageData?.faq_en || []);
+  const hasFaq = faqData.length > 0;
+
+  // ===== ✅ دالة تبديل حالة السؤال =====
+  const toggleFaq = (index) => {
+    setOpenFaqIndex(openFaqIndex === index ? null : index);
+  };
+
   // ============================================
   // النصوص
   // ============================================
@@ -794,6 +785,9 @@ export default function PackageDetailPage() {
       aboutVenue: 'عن المكان',
       location: 'الموقع على الخريطة',
       terms: 'الشروط والأحكام',
+      faqTitle: 'الأسئلة الشائعة',
+      faqSubtitle: 'إجابات على أكثر الأسئلة التي يطرحها عملاؤنا',
+      noFaq: 'لا توجد أسئلة شائعة متاحة حالياً',
       bookNow: 'احجز الآن',
       selectPackage: 'اختر الباقة المناسبة',
       startingFrom: 'تبدأ الأسعار من',
@@ -850,6 +844,9 @@ export default function PackageDetailPage() {
       aboutVenue: 'About the Venue',
       location: 'Location on Map',
       terms: 'Terms & Conditions',
+      faqTitle: 'Frequently Asked Questions',
+      faqSubtitle: 'Answers to the most common questions from our customers',
+      noFaq: 'No FAQs available at the moment',
       bookNow: 'Book Now',
       selectPackage: 'Select Your Package',
       startingFrom: 'Starting from',
@@ -998,12 +995,10 @@ export default function PackageDetailPage() {
   };
 
   // ============================================
-  // التصميم (UI) - باقي الكود كما هو
+  // التصميم (UI)
   // ============================================
   return (
     <article className="min-h-screen bg-gradient-to-br from-gray-50 to-white" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
-      {/* ... باقي التصميم كما هو ... */}
-      {/* ملاحظة: تم حذف باقي التصميم للاختصار، ولكن يجب أن يبقى كما هو من النسخة السابقة */}
       
       <div className="container mx-auto px-3 md:px-4 pt-3 md:pt-4">
         <div className="flex flex-wrap items-center justify-between gap-2 md:gap-3">
@@ -1429,6 +1424,7 @@ export default function PackageDetailPage() {
               </section>
             )}
 
+            {/* ===== قسم اختيار الباقات - مع عرض الوصف الكامل واللون الأخضر ===== */}
             {packageData.package_tiers?.length > 0 && (
               <section className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow duration-300">
                 <h2 className="text-lg md:text-xl font-bold text-primary mb-3 md:mb-4 flex items-center gap-2">
@@ -1446,19 +1442,20 @@ export default function PackageDetailPage() {
                     const discountPercentTier = hasTierDiscount 
                       ? Math.round(((tier.price_before_discount - tier.price) / tier.price_before_discount) * 100)
                       : 0;
+                    const isSelected = selectedTier?.id === tier.id;
                     
                     return (
                       <div
                         key={tier.id}
                         className={`group relative border-2 rounded-xl p-3 md:p-5 cursor-pointer transition-all duration-300 ${
-                          selectedTier?.id === tier.id
-                            ? 'border-accent bg-gradient-to-br from-accent/10 to-white shadow-lg scale-[1.02]'
-                            : 'border-gray-200 hover:border-primary hover:shadow-lg hover:scale-[1.02]'
+                          isSelected
+                            ? 'border-green-500 bg-gradient-to-br from-green-50 to-white shadow-lg scale-[1.02]'
+                            : 'border-gray-200 hover:border-green-400 hover:shadow-lg hover:scale-[1.02]'
                         }`}
                         onClick={() => setSelectedTier(tier)}
                       >
-                        {selectedTier?.id === tier.id && (
-                          <div className="absolute -top-1.5 -right-1.5 md:-top-2 md:-right-2 bg-accent text-white rounded-full p-0.5 md:p-1 shadow-lg">
+                        {isSelected && (
+                          <div className="absolute -top-1.5 -right-1.5 md:-top-2 md:-right-2 bg-green-500 text-white rounded-full p-0.5 md:p-1 shadow-lg z-10">
                             <CheckCircle size={12} className="md:w-[16px] md:h-[16px]" />
                           </div>
                         )}
@@ -1476,7 +1473,8 @@ export default function PackageDetailPage() {
                               )}
                             </div>
                             
-                            <div className="text-xs md:text-sm text-gray-600 leading-relaxed bg-gray-50 p-2 md:p-3 rounded-lg min-h-[40px] md:min-h-[60px]">
+                            {/* ===== الوصف الكامل بدون اقتصاص ===== */}
+                            <div className="text-xs md:text-sm text-gray-600 leading-relaxed bg-gray-50 p-2 md:p-3 rounded-lg min-h-[40px] md:min-h-[60px] whitespace-pre-wrap">
                               {locale === 'ar' ? tier.description_ar : tier.description_en}
                             </div>
                             
@@ -1495,7 +1493,7 @@ export default function PackageDetailPage() {
                                   <p className="text-[10px] md:text-sm text-gray-400 line-through">
                                     {tier.price_before_discount} {currencySymbol}
                                   </p>
-                                  <p className="text-lg md:text-2xl font-bold text-accent">
+                                  <p className="text-lg md:text-2xl font-bold text-green-600">
                                     {tier.price} {currencySymbol}
                                   </p>
                                 </div>
@@ -1504,7 +1502,7 @@ export default function PackageDetailPage() {
                                 </span>
                               </div>
                             ) : (
-                              <p className="text-lg md:text-2xl font-bold text-accent">
+                              <p className="text-lg md:text-2xl font-bold text-green-600">
                                 {tier.price} {currencySymbol}
                               </p>
                             )}
@@ -1525,6 +1523,104 @@ export default function PackageDetailPage() {
                 </h2>
                 <div className="text-gray-600 whitespace-pre-line text-xs md:text-sm leading-relaxed bg-gray-50 p-3 md:p-4 rounded-lg">
                   {terms}
+                </div>
+              </section>
+            )}
+
+            {/* ===== ✅ قسم الأسئلة الشائعة (FAQ) - بعد الشروط والأحكام ===== */}
+            {hasFaq && (
+              <section className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow duration-300">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-200">
+                    <HelpCircle size={20} className="md:w-[24px] md:h-[24px] text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg md:text-xl font-bold text-primary">
+                      {t.faqTitle}
+                    </h2>
+                    <p className="text-xs md:text-sm text-gray-500">
+                      {t.faqSubtitle}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 my-4">
+                  <div className="h-0.5 flex-1 bg-gradient-to-r from-transparent via-indigo-200 to-transparent rounded-full"></div>
+                  <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+                  <div className="h-0.5 flex-1 bg-gradient-to-r from-transparent via-indigo-200 to-transparent rounded-full"></div>
+                </div>
+
+                <div className="space-y-2 md:space-y-3">
+                  {faqData.map((faq, index) => {
+                    const isOpen = openFaqIndex === index;
+                    const question = faq.question || '';
+                    const answer = faq.answer || '';
+
+                    if (!question && !answer) return null;
+
+                    return (
+                      <div
+                        key={index}
+                        className={`rounded-xl border-2 transition-all duration-300 overflow-hidden ${
+                          isOpen 
+                            ? 'border-indigo-300 bg-indigo-50/50 shadow-lg shadow-indigo-100' 
+                            : 'border-gray-100 bg-white hover:border-indigo-200 hover:shadow-sm'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleFaq(index)}
+                          className="w-full flex items-center justify-between gap-3 p-3 md:p-4 text-right transition-colors duration-200"
+                          aria-expanded={isOpen}
+                        >
+                          <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
+                            <span className={`flex-shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center text-xs md:text-sm font-bold transition-all duration-300 ${
+                              isOpen 
+                                ? 'bg-indigo-500 text-white shadow-md' 
+                                : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              {index + 1}
+                            </span>
+                            <span className={`font-semibold text-sm md:text-base transition-colors duration-200 line-clamp-2 ${
+                              isOpen ? 'text-indigo-700' : 'text-gray-700'
+                            }`}>
+                              {question}
+                            </span>
+                          </div>
+                          
+                          <span className={`flex-shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                            isOpen 
+                              ? 'bg-indigo-500 text-white rotate-180' 
+                              : 'bg-gray-100 text-gray-400'
+                          }`}>
+                            <ChevronDown size={16} className="md:w-[18px] md:h-[18px]" />
+                          </span>
+                        </button>
+
+                        <div
+                          className={`transition-all duration-300 ease-in-out overflow-hidden ${
+                            isOpen ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
+                          }`}
+                        >
+                          <div className="px-3 md:px-4 pb-3 md:pb-4">
+                            <div className={`${locale === 'ar' ? 'mr-9 md:mr-11' : 'ml-9 md:ml-11'} border-r-2 border-indigo-300 pr-3 md:pr-4`}>
+                              <p className="text-gray-600 text-sm md:text-base leading-relaxed whitespace-pre-wrap">
+                                {answer}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-1 mt-4">
+                  <div className="h-0.5 flex-1 bg-gradient-to-r from-transparent via-indigo-200 to-transparent rounded-full"></div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-300"></div>
+                  <div className="w-1 h-1 rounded-full bg-indigo-200"></div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-300"></div>
+                  <div className="h-0.5 flex-1 bg-gradient-to-r from-transparent via-indigo-200 to-transparent rounded-full"></div>
                 </div>
               </section>
             )}
@@ -1661,13 +1757,16 @@ export default function PackageDetailPage() {
               </div>
 
               {selectedTier && (
-                <div className="mb-3 md:mb-5 p-3 md:p-4 bg-gradient-to-br from-accent/10 to-primary/5 rounded-xl border border-accent/20">
-                  <p className="text-[10px] md:text-xs text-gray-500 mb-0.5 md:mb-1">{locale === 'ar' ? 'الباقة المختارة' : 'Selected Package'}</p>
+                <div className="mb-3 md:mb-5 p-3 md:p-4 bg-gradient-to-br from-green-50 to-green-100/50 rounded-xl border border-green-200">
+                  <p className="text-[10px] md:text-xs text-green-700 mb-0.5 md:mb-1 flex items-center gap-1">
+                    <CheckCircle size={12} className="md:w-[14px] md:h-[14px] text-green-600" />
+                    {locale === 'ar' ? 'الباقة المختارة' : 'Selected Package'}
+                  </p>
                   <p className="font-bold text-primary text-xs md:text-sm">
                     {locale === 'ar' ? selectedTier.name_ar : selectedTier.name_en}
                   </p>
                   <div className="flex items-center justify-between mt-1.5 md:mt-2">
-                    <span className="text-base md:text-xl font-bold text-accent">
+                    <span className="text-base md:text-xl font-bold text-green-600">
                       {selectedTier.price} {currencySymbol}
                     </span>
                     {selectedTier.max_children && (
@@ -1678,7 +1777,7 @@ export default function PackageDetailPage() {
                     )}
                   </div>
                   {selectedBranch && (
-                    <div className="mt-1.5 md:mt-2 pt-1.5 md:pt-2 border-t border-accent/20 flex items-center gap-1 md:gap-1.5 text-[10px] md:text-xs text-gray-500">
+                    <div className="mt-1.5 md:mt-2 pt-1.5 md:pt-2 border-t border-green-200 flex items-center gap-1 md:gap-1.5 text-[10px] md:text-xs text-gray-500">
                       <Building size={10} className="md:w-[12px] md:h-[12px] text-primary" />
                       {locale === 'ar' ? selectedBranch.name_ar : selectedBranch.name_en}
                     </div>
