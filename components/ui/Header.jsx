@@ -1,5 +1,5 @@
 'use client';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import LanguageSwitcher from './LanguageSwitcher';
@@ -17,6 +17,7 @@ const allMessages = {
 
 export default function Header() {
   const params = useParams();
+  const pathname = usePathname();
   const locale = params?.locale || 'ar';
   const [mounted, setMounted] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -28,6 +29,19 @@ export default function Header() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // استخراج مسار الصفحة الحالية بدون اللغة
+  const getCurrentPathWithoutLocale = () => {
+    if (!pathname) return '';
+    const parts = pathname.split('/').filter(Boolean);
+    // إذا كان الجزء الأول هو اللغة (ar/en)، نزيله
+    if (parts.length > 0 && (parts[0] === 'ar' || parts[0] === 'en')) {
+      return '/' + parts.slice(1).join('/');
+    }
+    return pathname;
+  };
+
+  const currentPath = getCurrentPathWithoutLocale();
 
   const navItems = [
     { href: `/${locale}`, key: 'home' },
@@ -62,7 +76,9 @@ export default function Header() {
               <Link
                 key={item.key}
                 href={item.href}
-                className="text-gray-600 hover:text-primary transition font-medium text-sm"
+                className={`text-gray-600 hover:text-primary transition font-medium text-sm ${
+                  pathname === item.href ? 'text-primary font-bold' : ''
+                }`}
               >
                 {t[item.key] || item.key}
               </Link>
@@ -93,7 +109,9 @@ export default function Header() {
                   key={item.key}
                   href={item.href}
                   onClick={() => setIsMenuOpen(false)}
-                  className="text-gray-600 hover:text-primary transition font-medium text-sm py-2 px-3 rounded-lg hover:bg-gray-50"
+                  className={`text-gray-600 hover:text-primary transition font-medium text-sm py-2 px-3 rounded-lg hover:bg-gray-50 ${
+                    pathname === item.href ? 'text-primary font-bold bg-gray-50' : ''
+                  }`}
                 >
                   {t[item.key] || item.key}
                 </Link>

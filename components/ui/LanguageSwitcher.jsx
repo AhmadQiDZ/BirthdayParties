@@ -8,6 +8,8 @@ export default function LanguageSwitcher() {
   const currentLocale = params?.locale || 'ar';
 
   const switchLanguage = (newLocale) => {
+    if (newLocale === currentLocale) return;
+
     // تغيير الاتجاه فوراً
     const newDir = newLocale === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.setAttribute('dir', newDir);
@@ -15,20 +17,39 @@ export default function LanguageSwitcher() {
     document.documentElement.style.direction = newDir;
     document.body.className = newLocale === 'ar' ? 'font-sans-ar' : 'font-sans-en';
     
-    // إنشاء المسار الجديد
-    let newPathname;
-    if (currentLocale === 'ar' && newLocale === 'en') {
-      newPathname = pathname.replace('/ar', '/en');
-    } else if (currentLocale === 'en' && newLocale === 'ar') {
-      newPathname = pathname.replace('/en', '/ar');
+    // الحصول على المسار الحالي
+    let currentPath = pathname;
+    
+    // استبدال اللغة في المسار
+    let newPath = currentPath;
+    
+    // إذا كان المسار يبدأ باللغة الحالية
+    if (currentPath.startsWith(`/${currentLocale}`)) {
+      newPath = currentPath.replace(`/${currentLocale}`, `/${newLocale}`);
     } else {
-      newPathname = `/${newLocale}${pathname.replace(/^\/[^\/]+/, '')}`;
+      // إذا كان المسار لا يحتوي على اللغة، أضفها
+      newPath = `/${newLocale}${currentPath}`;
     }
     
-    if (!newPathname.startsWith('/')) newPathname = '/' + newPathname;
-    if (newPathname === `/${newLocale}`) newPathname = `/${newLocale}/`;
+    // تنظيف المسار من القيم غير الصالحة
+    newPath = newPath
+      .replace(/\/undefined/g, '')
+      .replace(/\/null/g, '')
+      .replace(/\/+/g, '/');
     
-    router.push(newPathname);
+    // التأكد من أن المسار يبدأ بـ "/"
+    if (!newPath.startsWith('/')) {
+      newPath = '/' + newPath;
+    }
+    
+    console.log('🔄 Switching language:', {
+      from: currentLocale,
+      to: newLocale,
+      oldPath: pathname,
+      newPath: newPath
+    });
+    
+    router.push(newPath);
   };
 
   return (

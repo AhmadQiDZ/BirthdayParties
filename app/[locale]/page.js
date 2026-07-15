@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronRight, ChevronLeft, MapPin, Search } from 'lucide-react';
+import { ChevronRight, ChevronLeft, MapPin, Search, Tag, Users, Star, Building, Gift, Percent } from 'lucide-react';
 import WhatsAppPopup from '@/components/ui/WhatsAppPopup';
 import { supabase } from '@/lib/supabase';
 
@@ -15,6 +15,7 @@ export default function HomePage() {
   const [filteredCities, setFilteredCities] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [packages, setPackages] = useState([]);
   
   // ===== الهيرو الرئيسي (من main_heroes) =====
   const [mainHeroes, setMainHeroes] = useState([]);
@@ -95,7 +96,6 @@ export default function HomePage() {
   useEffect(() => {
     if (filteredCities.length === 0) return;
 
-    // تهيئة المؤشرات لكل مدينة
     const initialIndices = {};
     filteredCities.forEach(city => {
       if (city.hero_images && city.hero_images.length > 1) {
@@ -104,7 +104,6 @@ export default function HomePage() {
     });
     setCityImageIndices(initialIndices);
 
-    // تغيير الصور كل 4 ثواني
     const interval = setInterval(() => {
       setCityImageIndices(prev => {
         const newIndices = { ...prev };
@@ -128,13 +127,14 @@ export default function HomePage() {
     await Promise.all([
       fetchCities(),
       fetchMainHeroes(),
-      fetchSecondaryHeroes()
+      fetchSecondaryHeroes(),
+      fetchPackages()
     ]);
     setLoading(false);
   }
 
   // ============================================
-  // جلب المدن من جدول cities الجديد (مع الدول)
+  // جلب المدن من جدول cities (مع الدول)
   // ============================================
   async function fetchCities() {
     try {
@@ -159,6 +159,42 @@ export default function HomePage() {
         setCities(data || []);
         setFilteredCities(data || []);
         console.log('✅ Cities loaded from cities table:', data);
+      }
+    } catch (err) {
+      console.error('❌ Error:', err);
+    }
+  }
+
+  // ============================================
+  // جلب الباقات
+  // ============================================
+  async function fetchPackages() {
+    try {
+      const { data, error } = await supabase
+        .from('packages')
+        .select(`
+          *,
+          cities (
+            id,
+            name_ar,
+            name_en,
+            slug
+          ),
+          branches (
+            id,
+            name_ar,
+            name_en,
+            tiers:package_tiers(*)
+          )
+        `)
+        .eq('status', 'live')
+        .is('deleted_at', null);
+
+      if (error) {
+        console.error('❌ Error fetching packages:', error);
+      } else {
+        setPackages(data || []);
+        console.log('✅ Packages loaded:', data?.length || 0);
       }
     } catch (err) {
       console.error('❌ Error:', err);
@@ -238,23 +274,105 @@ export default function HomePage() {
   };
 
   // ============================================
-  // جلب الباقات للربط مع الهيرو
+  // دالة مساعدة لإنشاء slug
   // ============================================
-  const [packages, setPackages] = useState([]);
+  const createSlug = (text) => {
+    if (!text) return '';
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\u0600-\u06FF]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  };
 
-  useEffect(() => {
-    async function fetchPackages() {
-      const { data, error } = await supabase
-        .from('packages')
-        .select('*, cities(*)')
-        .eq('status', 'live')
-        .is('deleted_at', null);
-      if (!error && data) {
-        setPackages(data);
-      }
+  // ============================================
+  // الحصول على الصورة الحالية للمدينة
+  // ============================================
+  const getCurrentCityImage = (city) => {
+    if (!city.hero_images || city.hero_images.length === 0) {
+      return null;
     }
-    fetchPackages();
-  }, []);
+    const index = cityImageIndices[city.id] || 0;
+    return city.hero_images[index];
+  };
+
+  // ============================================
+  // معرفة إذا كانت المدينة لديها أكثر من صورة
+  // ============================================
+  const hasMultipleImages = (city) => {
+    return city.hero_images && city.hero_images.length > 1;
+  };
+
+  // ============================================
+  // دالة الحصول على رمز العملة حسب كود العملة
+  // ============================================
+  const getCurrencySymbol = (currency) => {
+    const currencies = {
+      'SAR': { ar: 'ر.س', en: 'SAR' },
+      'AED': { ar: 'د.إ', en: 'AED' },
+      'BHD': { ar: 'د.ب', en: 'BHD' },
+      'QAR': { ar: 'ر.ق', en: 'QAR' },
+      'EUR': { ar: '€', en: 'EUR' },
+      'GBP': { ar: '£', en: 'GBP' },
+      'USD': { ar: '$', en: 'USD' }
+    };
+    const lang = locale === 'ar' ? 'ar' : 'en';
+    return currencies[currency]?.[lang] || (locale === 'ar' ? 'ر.س' : 'SAR');
+  };
+
+  // ============================================
+  // حساب إحصائيات المدينة من الباقات
+  // ============================================
+  const getCityStats = (cityId) => {
+    const cityPackages = packages.filter(pkg => pkg.city_id === cityId);
+    const totalPackages = cityPackages.length;
+    
+    let minPrice = Infinity;
+    let maxDiscount = 0;
+    let totalBranches = 0;
+    let totalTiers = 0;
+    let cityCurrency = 'SAR';
+    
+    cityPackages.forEach(pkg => {
+      // جلب عملة الباقة
+      if (pkg.currency) {
+        cityCurrency = pkg.currency;
+      }
+      
+      if (pkg.branches) {
+        pkg.branches.forEach(branch => {
+          if (branch.tiers) {
+            branch.tiers.forEach(tier => {
+              totalTiers++;
+              if (tier.price && tier.price < minPrice) {
+                minPrice = tier.price;
+              }
+              if (tier.price_before_discount && tier.price_before_discount > tier.price) {
+                const discount = ((tier.price_before_discount - tier.price) / tier.price_before_discount) * 100;
+                if (discount > maxDiscount) {
+                  maxDiscount = discount;
+                }
+              }
+            });
+          }
+          totalBranches++;
+        });
+      }
+    });
+    
+    if (minPrice === Infinity) minPrice = 0;
+    const currencySymbol = getCurrencySymbol(cityCurrency);
+    
+    return {
+      totalPackages,
+      totalTiers,
+      minPrice,
+      maxDiscount: Math.round(maxDiscount),
+      totalBranches,
+      currency: cityCurrency,
+      currencySymbol
+    };
+  };
 
   // ============================================
   // عرض الهيرو الرئيسي
@@ -284,7 +402,7 @@ export default function HomePage() {
     } else if (hero.package_id) {
       const pkg = packages.find(p => p.id === hero.package_id);
       if (pkg && pkg.cities) {
-        const citySlug = locale === 'ar' ? pkg.cities.slug_ar : pkg.cities.slug_en;
+        const citySlug = pkg.cities.slug;
         const pkgSlug = createSlug(locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en);
         linkUrl = `/${locale}/${citySlug}/${pkgSlug}`;
       }
@@ -355,7 +473,7 @@ export default function HomePage() {
     } else if (hero.package_id) {
       const pkg = packages.find(p => p.id === hero.package_id);
       if (pkg && pkg.cities) {
-        const citySlug = locale === 'ar' ? pkg.cities.slug_ar : pkg.cities.slug_en;
+        const citySlug = pkg.cities.slug;
         const pkgSlug = createSlug(locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en);
         linkUrl = `/${locale}/${citySlug}/${pkgSlug}`;
       }
@@ -435,36 +553,6 @@ export default function HomePage() {
     );
   }
 
-  // ============================================
-  // دالة مساعدة لإنشاء slug
-  // ============================================
-  const createSlug = (text) => {
-    if (!text) return '';
-    return text
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9\u0600-\u06FF]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-  };
-
-  // ============================================
-  // الحصول على الصورة الحالية للمدينة
-  // ============================================
-  const getCurrentCityImage = (city) => {
-    if (!city.hero_images || city.hero_images.length === 0) {
-      return null;
-    }
-    const index = cityImageIndices[city.id] || 0;
-    return city.hero_images[index];
-  };
-
-  // ============================================
-  // معرفة إذا كانت المدينة لديها أكثر من صورة
-  // ============================================
-  const hasMultipleImages = (city) => {
-    return city.hero_images && city.hero_images.length > 1;
-  };
-
   if (!mounted || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -488,10 +576,10 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto">
           {/* عنوان القسم */}
           <div className="text-center mb-8">
-            <h2 className="text-3xl md:text-4xl font-bold text-primary">
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-primary">
               {locale === 'ar' ? 'اكتشف المدن' : 'Discover Cities'}
             </h2>
-            <p className="text-gray-500 mt-2">
+            <p className="text-gray-500 mt-2 text-base md:text-lg">
               {locale === 'ar' 
                 ? 'اختر مدينتك واكتشف أفضل باقات حفلات أعياد الميلاد'
                 : 'Choose your city and discover the best birthday party packages'}
@@ -501,18 +589,18 @@ export default function HomePage() {
           {/* شريط البحث */}
           <div className="max-w-2xl mx-auto mb-8">
             <div className="relative">
-              <Search size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search size={22} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder={locale === 'ar' ? 'ابحث عن مدينة...' : 'Search for a city...'}
-                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                className="w-full pl-10 pr-4 py-3.5 text-lg border border-gray-200 rounded-xl focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
             </div>
           </div>
 
-          {/* شبكة المدن مع أعلام الدول */}
+          {/* شبكة المدن - تصميم عرضي (أفقي) */}
           {filteredCities.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-6xl mb-4">🏙️</div>
@@ -527,14 +615,16 @@ export default function HomePage() {
                 const hasMultiple = hasMultipleImages(city);
                 const totalImages = city.hero_images?.length || 0;
                 const currentIndex = cityImageIndices[city.id] || 0;
+                const stats = getCityStats(city.id);
 
                 return (
                   <Link
                     key={city.id}
                     href={`/${locale}/${city.slug}`}
-                    className="group bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-500 hover:-translate-y-2"
+                    className="group bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 border border-gray-100"
                   >
-                    <div className="relative h-56 overflow-hidden">
+                    {/* صورة المدينة - نسبة عرض مناسبة */}
+                    <div className="relative h-56 md:h-60 overflow-hidden bg-gray-100">
                       {currentImage ? (
                         <>
                           <img
@@ -544,8 +634,10 @@ export default function HomePage() {
                           />
                           {/* عداد الصور */}
                           {hasMultiple && (
-                            <div className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-sm text-white text-xs px-2.5 py-1 rounded-full">
-                              {currentIndex + 1} / {totalImages}
+                            <div className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-sm text-white text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5">
+                              <span className="font-medium">{currentIndex + 1}</span>
+                              <span className="opacity-50">/</span>
+                              <span>{totalImages}</span>
                             </div>
                           )}
                           {/* نقاط المؤشر للصور */}
@@ -554,10 +646,10 @@ export default function HomePage() {
                               {city.hero_images.map((_, idx) => (
                                 <div
                                   key={idx}
-                                  className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
+                                  className={`h-1.5 rounded-full transition-all duration-300 ${
                                     idx === currentIndex 
-                                      ? 'bg-white w-4' 
-                                      : 'bg-white/40'
+                                      ? 'bg-white w-5' 
+                                      : 'bg-white/40 w-1.5'
                                   }`}
                                 />
                               ))}
@@ -565,23 +657,79 @@ export default function HomePage() {
                           )}
                         </>
                       ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-                          <MapPin size={48} className="text-primary/40" />
+                        <div className="w-full h-full bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center">
+                          <MapPin size={48} className="text-primary/30" />
                         </div>
                       )}
+                      
+                      {/* Overlay للعنوان */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                       
-                      <div className="absolute bottom-4 left-4 right-4 text-white">
+                      {/* اسم المدينة والعلم */}
+                      <div className="absolute bottom-3 left-4 right-4 text-white">
                         <div className="flex items-center gap-2">
-                          <span className="text-2xl font-bold">{city.name_ar}</span>
-                          <span className="text-sm opacity-80">{city.countries?.flag_emoji}</span>
+                          <span className="text-2xl md:text-3xl font-bold">{city.name_ar}</span>
+                          <span className="text-xl">{city.countries?.flag_emoji}</span>
                         </div>
                         <p className="text-sm opacity-80">{city.name_en}</p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-xs">
-                            {locale === 'ar' ? 'استكشف' : 'Explore'}
+                      </div>
+                    </div>
+
+                    {/* معلومات المدينة - تصميم عرضي مدمج */}
+                    <div className="p-4 space-y-3">
+                      {/* عدد الباقات والفروع - صف واحد */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-gray-700">
+                          <Gift size={18} className="text-primary" />
+                          <span className="font-bold text-gray-800">
+                            {stats.totalPackages} {locale === 'ar' ? 'باقة' : 'Packages'}
                           </span>
-                          <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                        </div>
+                        {stats.totalBranches > 0 && (
+                          <div className="flex items-center gap-1 text-gray-500">
+                            <Building size={16} />
+                            <span className="text-sm font-medium">{stats.totalBranches}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* الخصم والسعر في صف واحد */}
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-100">
+                        {/* الخصم */}
+                        {stats.maxDiscount > 0 ? (
+                          <div className="flex items-center gap-1.5 bg-green-50 text-green-700 px-3 py-1.5 rounded-full">
+                            <Percent size={15} className="text-green-600" />
+                            <span className="font-bold text-sm">{stats.maxDiscount}%</span>
+                            <span className="text-xs text-green-600">
+                              {locale === 'ar' ? 'خصم' : 'OFF'}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-gray-400">
+                            <Percent size={15} />
+                            <span className="text-xs">{locale === 'ar' ? 'لا يوجد خصم' : 'No discount'}</span>
+                          </div>
+                        )}
+                        
+                        {/* السعر */}
+                        {stats.minPrice > 0 && (
+                          <div className="flex items-center gap-1 bg-primary/10 px-3 py-1.5 rounded-full">
+                            <span className="text-xs text-gray-500">{locale === 'ar' ? 'من' : 'From'}</span>
+                            <span className="font-bold text-primary text-sm">
+                              {stats.minPrice}
+                            </span>
+                            <span className="text-xs text-gray-500">{stats.currencySymbol}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* زر الاستكشاف */}
+                      <div className="pt-1">
+                        <div className="flex items-center justify-between text-primary group-hover:text-accent transition-colors text-sm font-medium">
+                          <span>
+                            {locale === 'ar' ? 'استكشف الباقات' : 'Explore Packages'}
+                          </span>
+                          <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
                         </div>
                       </div>
                     </div>

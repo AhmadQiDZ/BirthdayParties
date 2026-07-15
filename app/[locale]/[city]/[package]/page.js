@@ -112,13 +112,22 @@ export default function PackageDetailPage() {
 
   const createSlug = (text) => {
     if (!text) return '';
-    return text.toLowerCase().trim().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-').replace(/^-+|-+$/g, '');
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\u0600-\u06FF]+/g, '-')
+      .replace(/^-+|-+$/g, '');
   };
 
   const compareSlugs = (slug1, slug2) => {
     const normalizeArabic = (text) => {
       if (!text) return '';
-      return text.replace(/[أآإ]/g, 'ا').replace(/[ة]/g, 'ه').replace(/[ى]/g, 'ي').replace(/[ؤ]/g, 'و').replace(/[ئ]/g, 'ي');
+      return text
+        .replace(/[أآإ]/g, 'ا')
+        .replace(/[ة]/g, 'ه')
+        .replace(/[ى]/g, 'ي')
+        .replace(/[ؤ]/g, 'و')
+        .replace(/[ئ]/g, 'ي');
     };
     return normalizeArabic(slug1) === normalizeArabic(slug2);
   };
@@ -133,20 +142,22 @@ export default function PackageDetailPage() {
   }, [locale]);
 
   useEffect(() => {
-    // التحقق من وجود citySlug صالح
-    if (citySlug && citySlug !== 'undefined' && citySlug !== 'null' && packageSlug && packageSlug !== 'undefined' && packageSlug !== 'null') {
+    if (citySlug && citySlug !== 'undefined' && citySlug !== 'null' && 
+        packageSlug && packageSlug !== 'undefined' && packageSlug !== 'null') {
       fetchPackageData();
       window.scrollTo({ top: 0, behavior: 'auto' });
     } else {
       console.warn('⚠️ Invalid citySlug or packageSlug:', { citySlug, packageSlug });
-      // إذا كانت القيم غير صالحة، حاول إعادة التوجيه
       if (citySlug === 'undefined' || citySlug === 'null') {
         fetchPackageBySlugOnly();
       }
     }
-  }, [citySlug, packageSlug, branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citySlug, packageSlug, branchId, locale]);
 
-  // 🔧 FIX: جلب الباقة فقط ثم الحصول على المدينة منها
+  // ============================================
+  // جلب الباقة فقط ثم الحصول على المدينة منها
+  // ============================================
   async function fetchPackageBySlugOnly() {
     try {
       console.log('🔍 Trying to find package by slug only:', packageSlug);
@@ -168,18 +179,46 @@ export default function PackageDetailPage() {
         return;
       }
 
-      // البحث عن الباقة بالـ slug
+      // البحث عن الباقة بالـ slug حسب اللغة
       let foundPackage = null;
       
       if (packagesList && packagesList.length > 0) {
+        // محاولة مطابقة الـ slug حسب اللغة
+        const slugField = locale === 'ar' ? 'slug_ar' : 'slug_en';
+        
         foundPackage = packagesList.find(pkg => {
+          // 1. مطابقة slug حسب اللغة
+          if (pkg[slugField] === packageSlug) return true;
+          
+          // 2. مطابقة slug العادي
+          if (pkg.slug === packageSlug) return true;
+          
+          // 3. مطابقة الاسم المحول إلى slug (العربي أو الإنجليزي حسب اللغة)
           const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
           const pkgSlug = createSlug(pkgName);
           if (pkgSlug === packageSlug) return true;
+          
+          // 4. مطابقة slug_ar أو slug_en باستخدام contains
+          if (pkg.slug_ar && packageSlug.includes(pkg.slug_ar)) return true;
+          if (pkg.slug_en && packageSlug.includes(pkg.slug_en)) return true;
+          
+          // 5. مطابقة بعد تطبيع الحروف العربية
           if (compareSlugs(pkgSlug, packageSlug)) return true;
-          const normalizedPkgName = pkgName.toLowerCase().trim().replace(/\s+/g, '-');
+          
+          // 6. مطابقة الاسم الكامل مع استبدال الشرطات بمسافات
+          const normalizedPkgName = pkgName?.toLowerCase().trim().replace(/\s+/g, '-') || '';
           const normalizedPackageSlug = packageSlug.replace(/-/g, ' ');
           if (normalizedPkgName === normalizedPackageSlug) return true;
+          if (normalizedPkgName === packageSlug) return true;
+          
+          // 7. مطابقة جزء من الاسم
+          const searchTerms = packageSlug.replace(/-/g, ' ').toLowerCase().split(' ');
+          const nameTerms = pkgName?.toLowerCase().split(' ') || [];
+          const matchCount = searchTerms.filter(term => 
+            nameTerms.some(nameTerm => nameTerm.includes(term) || term.includes(nameTerm))
+          ).length;
+          if (matchCount >= Math.min(searchTerms.length, 2)) return true;
+          
           return false;
         });
 
@@ -189,6 +228,17 @@ export default function PackageDetailPage() {
           foundPackage = packagesList.find(pkg => {
             const name = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
             return name && name.toLowerCase().includes(packageName.toLowerCase());
+          });
+        }
+        
+        // إذا لم يتم العثور، محاولة البحث في الاسم العربي والإنجليزي معاً
+        if (!foundPackage) {
+          const packageName = packageSlug.replace(/-/g, ' ');
+          foundPackage = packagesList.find(pkg => {
+            const nameAr = pkg.venue_name_ar || '';
+            const nameEn = pkg.venue_name_en || '';
+            return nameAr.toLowerCase().includes(packageName.toLowerCase()) ||
+                   nameEn.toLowerCase().includes(packageName.toLowerCase());
           });
         }
       }
@@ -202,7 +252,8 @@ export default function PackageDetailPage() {
       // الحصول على المدينة من الباقة
       const citySlugFromPackage = foundPackage.cities?.slug || 
                                   foundPackage.cities?.slug_ar || 
-                                  foundPackage.cities?.slug_en;
+                                  foundPackage.cities?.slug_en ||
+                                  foundPackage.cities?.name_en?.toLowerCase().replace(/\s+/g, '-');
       
       if (!citySlugFromPackage) {
         console.error('❌ City not found for package');
@@ -212,8 +263,13 @@ export default function PackageDetailPage() {
 
       console.log('✅ Found package in city:', citySlugFromPackage);
       
+      // الحصول على الـ slug الصحيح للباقة حسب اللغة
+      const correctPackageSlug = locale === 'ar' 
+        ? (foundPackage.slug_ar || createSlug(foundPackage.venue_name_ar))
+        : (foundPackage.slug_en || createSlug(foundPackage.venue_name_en));
+      
       // إعادة التوجيه إلى الرابط الصحيح مع المدينة
-      const newPath = `/${locale}/${citySlugFromPackage}/${packageSlug}`;
+      const newPath = `/${locale}/${citySlugFromPackage}/${correctPackageSlug}`;
       console.log('🔄 Redirecting to:', newPath);
       router.replace(newPath);
       
@@ -223,6 +279,9 @@ export default function PackageDetailPage() {
     }
   }
 
+  // ============================================
+  // جلب بيانات الباقة
+  // ============================================
   async function fetchPackageData() {
     setLoading(true);
     setPackageData(null);
@@ -240,14 +299,13 @@ export default function PackageDetailPage() {
     setBookingError('');
 
     try {
-      // التحقق من citySlug قبل جلب البيانات
       if (!citySlug || citySlug === 'undefined' || citySlug === 'null') {
         console.error('❌ City slug is invalid:', citySlug);
         setLoading(false);
         return;
       }
 
-      // جلب المدينة
+      // ========== جلب المدينة ==========
       let city = null;
       
       console.log('🔍 Searching for city with slug:', citySlug);
@@ -303,7 +361,6 @@ export default function PackageDetailPage() {
               console.log('✅ City found by LIKE:', city.name_ar);
             } else {
               console.error('❌ City not found for slug:', citySlug);
-              // محاولة البحث عن الباقة فقط
               await fetchPackageBySlugOnly();
               setLoading(false);
               return;
@@ -314,7 +371,6 @@ export default function PackageDetailPage() {
 
       if (!city) {
         console.error('❌ City not found');
-        // محاولة البحث عن الباقة فقط
         await fetchPackageBySlugOnly();
         setLoading(false);
         return;
@@ -322,7 +378,7 @@ export default function PackageDetailPage() {
 
       setCityData(city);
 
-      // جلب الباقات
+      // ========== جلب الباقات ==========
       const { data: packagesList, error: packagesError } = await supabase
         .from('packages')
         .select(`
@@ -340,29 +396,99 @@ export default function PackageDetailPage() {
         return;
       }
 
-      // البحث عن الباقة المطلوبة
+      // ========== البحث عن الباقة المطلوبة ==========
       let foundPackage = null;
       
       if (packagesList && packagesList.length > 0) {
-        // محاولة مطابقة الـ slug
-        foundPackage = packagesList.find(pkg => {
-          const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
-          const pkgSlug = createSlug(pkgName);
-          if (pkgSlug === packageSlug) return true;
-          if (compareSlugs(pkgSlug, packageSlug)) return true;
-          const normalizedPkgName = pkgName.toLowerCase().trim().replace(/\s+/g, '-');
-          const normalizedPackageSlug = packageSlug.replace(/-/g, ' ');
-          if (normalizedPkgName === normalizedPackageSlug) return true;
-          return false;
-        });
-
-        // إذا لم يتم العثور، محاولة البحث بالاسم
-        if (!foundPackage) {
-          const packageName = packageSlug.replace(/-/g, ' ');
-          foundPackage = packagesList.find(pkg => {
-            const name = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
-            return name && name.toLowerCase().includes(packageName.toLowerCase());
-          });
+        // تحديد الحقل المناسب للبحث حسب اللغة
+        const slugField = locale === 'ar' ? 'slug_ar' : 'slug_en';
+        
+        console.log('🔍 Searching for package with slug:', packageSlug);
+        console.log('🔍 Using slug field:', slugField);
+        
+        // 1. محاولة مطابقة الـ slug حسب اللغة (الأفضل)
+        foundPackage = packagesList.find(pkg => pkg[slugField] === packageSlug);
+        
+        if (foundPackage) {
+          console.log('✅ Package found by language-specific slug:', slugField, '=', packageSlug);
+        } else {
+          // 2. محاولة مطابقة الـ slug العادي
+          foundPackage = packagesList.find(pkg => pkg.slug === packageSlug);
+          if (foundPackage) {
+            console.log('✅ Package found by generic slug');
+          } else {
+            // 3. محاولة مطابقة الاسم المحول إلى slug
+            foundPackage = packagesList.find(pkg => {
+              const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
+              const pkgSlug = createSlug(pkgName);
+              return pkgSlug === packageSlug;
+            });
+            if (foundPackage) {
+              console.log('✅ Package found by generated slug from name');
+            } else {
+              // 4. محاولة مطابقة slug_ar أو slug_en باستخدام contains
+              foundPackage = packagesList.find(pkg => {
+                if (pkg.slug_ar && packageSlug.includes(pkg.slug_ar)) return true;
+                if (pkg.slug_en && packageSlug.includes(pkg.slug_en)) return true;
+                return false;
+              });
+              if (foundPackage) {
+                console.log('✅ Package found by slug contains match');
+              } else {
+                // 5. محاولة مطابقة بعد تطبيع الحروف العربية
+                foundPackage = packagesList.find(pkg => {
+                  const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
+                  const pkgSlug = createSlug(pkgName);
+                  return compareSlugs(pkgSlug, packageSlug);
+                });
+                if (foundPackage) {
+                  console.log('✅ Package found by normalized slug');
+                } else {
+                  // 6. محاولة مطابقة الاسم الكامل
+                  const packageName = packageSlug.replace(/-/g, ' ');
+                  foundPackage = packagesList.find(pkg => {
+                    const name = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
+                    return name && name.toLowerCase().includes(packageName.toLowerCase());
+                  });
+                  if (foundPackage) {
+                    console.log('✅ Package found by name match');
+                  } else {
+                    // 7. محاولة البحث في الاسم العربي والإنجليزي معاً
+                    const packageName = packageSlug.replace(/-/g, ' ');
+                    foundPackage = packagesList.find(pkg => {
+                      const nameAr = pkg.venue_name_ar || '';
+                      const nameEn = pkg.venue_name_en || '';
+                      return nameAr.toLowerCase().includes(packageName.toLowerCase()) ||
+                             nameEn.toLowerCase().includes(packageName.toLowerCase());
+                    });
+                    if (foundPackage) {
+                      console.log('✅ Package found by name match (AR/EN)');
+                    } else {
+                      // 8. محاولة البحث باستخدام LIKE على slug_ar و slug_en
+                      console.log('🔍 Trying LIKE search on slugs...');
+                      const { data: likeResult, error: likeError } = await supabase
+                        .from('packages')
+                        .select(`
+                          *,
+                          cities (*),
+                          package_tiers (*)
+                        `)
+                        .eq('city_id', city.id)
+                        .eq('status', 'live')
+                        .is('deleted_at', null)
+                        .or(`slug_ar.ilike.%${packageSlug}%,slug_en.ilike.%${packageSlug}%,slug.ilike.%${packageSlug}%`)
+                        .limit(1);
+                      
+                      if (!likeError && likeResult && likeResult.length > 0) {
+                        foundPackage = likeResult[0];
+                        console.log('✅ Package found by LIKE search on slugs');
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
 
@@ -377,16 +503,27 @@ export default function PackageDetailPage() {
       // التحقق من أن المدينة في الباقة تطابق citySlug
       const packageCitySlug = foundPackage.cities?.slug || 
                              foundPackage.cities?.slug_ar || 
-                             foundPackage.cities?.slug_en;
+                             foundPackage.cities?.slug_en ||
+                             foundPackage.cities?.name_en?.toLowerCase().replace(/\s+/g, '-');
       
+      // إذا كانت المدينة مختلفة، قم بإعادة التوجيه
       if (packageCitySlug && packageCitySlug !== citySlug) {
-        console.log('🔄 Package belongs to different city, redirecting...');
-        const newPath = `/${locale}/${packageCitySlug}/${packageSlug}`;
-        router.replace(newPath);
-        setLoading(false);
-        return;
+        // التحقق مما إذا كانت المدينة متطابقة بعد التطبيع
+        const isMatching = compareSlugs(packageCitySlug, citySlug);
+        if (!isMatching) {
+          console.log('🔄 Package belongs to different city, redirecting...');
+          // الحصول على الـ slug الصحيح للباقة حسب اللغة
+          const correctSlug = locale === 'ar' 
+            ? (foundPackage.slug_ar || createSlug(foundPackage.venue_name_ar))
+            : (foundPackage.slug_en || createSlug(foundPackage.venue_name_en));
+          const newPath = `/${locale}/${packageCitySlug}/${correctSlug}`;
+          router.replace(newPath);
+          setLoading(false);
+          return;
+        }
       }
 
+      console.log('✅ Package found:', foundPackage.venue_name_ar || foundPackage.venue_name_en);
       setPackageData(foundPackage);
       await loadPackageDetails(foundPackage);
       
@@ -397,6 +534,9 @@ export default function PackageDetailPage() {
     }
   }
 
+  // ============================================
+  // تحميل تفاصيل الباقة
+  // ============================================
   async function loadPackageDetails(pkg) {
     if (!pkg) return;
     
@@ -450,6 +590,9 @@ export default function PackageDetailPage() {
     updateSEOMetadata(pkg, cityData);
   }
 
+  // ============================================
+  // تحسين SEO
+  // ============================================
   function updateSEOMetadata(data, city) {
     const cityName = locale === 'ar' ? city?.name_ar : city?.name_en;
     const venueName = locale === 'ar' ? data.venue_name_ar : data.venue_name_en;
@@ -470,6 +613,9 @@ export default function PackageDetailPage() {
     }
   }
 
+  // ============================================
+  // إرسال الحجز
+  // ============================================
   async function handleSubmit(e) {
     e.preventDefault();
     setBookingError('');
@@ -557,6 +703,9 @@ export default function PackageDetailPage() {
     setSubmitting(false);
   }
 
+  // ============================================
+  // دوال معرض الصور
+  // ============================================
   const nextImage = () => {
     if (packageData?.images?.length > 0) {
       setCurrentImageIndex((prev) => (prev + 1) % packageData.images.length);
@@ -636,6 +785,9 @@ export default function PackageDetailPage() {
   const embedUrl = convertToEmbedUrl(mapUrl);
   const currencySymbol = getCurrencySymbol(packageData?.currency || 'SAR');
 
+  // ============================================
+  // النصوص
+  // ============================================
   const texts = {
     ar: {
       pageTitle: 'تفاصيل الباقة',
@@ -753,7 +905,9 @@ export default function PackageDetailPage() {
 
   const t = texts[locale] || texts.ar;
 
-  // إذا كانت المدينة غير صالحة، عرض رسالة تحميل
+  // ============================================
+  // حالات التحميل والأخطاء
+  // ============================================
   if (!citySlug || citySlug === 'undefined' || citySlug === 'null') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 px-4">
@@ -812,11 +966,9 @@ export default function PackageDetailPage() {
     );
   }
 
-  // ... باقي الكود (العرض) يبقى كما هو من النسخة السابقة ...
-  
-  // ملاحظة: تم حذف جزء العرض للاختصار، ولكن يجب أن يبقى كما هو
-  // من النسخة السابقة لأنه لم يتغير
-  
+  // ============================================
+  // المتغيرات المحسوبة
+  // ============================================
   const venueName = locale === 'ar' ? packageData.venue_name_ar : packageData.venue_name_en;
   const description = locale === 'ar' ? packageData.description_ar : packageData.description_en;
   const terms = locale === 'ar' ? packageData.terms_ar : packageData.terms_en;
@@ -838,13 +990,22 @@ export default function PackageDetailPage() {
 
   const getPackageLink = (pkg) => {
     const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
-    const pkgSlug = createSlug(pkgName);
+    // استخدام slug حسب اللغة إذا كان موجوداً
+    const pkgSlug = locale === 'ar' 
+      ? (pkg.slug_ar || createSlug(pkgName))
+      : (pkg.slug_en || createSlug(pkgName));
     return `/${locale}/${citySlug}/${pkgSlug}`;
   };
 
+  // ============================================
+  // التصميم (UI) - باقي الكود كما هو
+  // ============================================
   return (
     <article className="min-h-screen bg-gradient-to-br from-gray-50 to-white" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
-      <nav className="container mx-auto px-3 md:px-4 pt-3 md:pt-4" aria-label="شريط التنقل">
+      {/* ... باقي التصميم كما هو ... */}
+      {/* ملاحظة: تم حذف باقي التصميم للاختصار، ولكن يجب أن يبقى كما هو من النسخة السابقة */}
+      
+      <div className="container mx-auto px-3 md:px-4 pt-3 md:pt-4">
         <div className="flex flex-wrap items-center justify-between gap-2 md:gap-3">
           <button
             onClick={goBack}
@@ -886,7 +1047,7 @@ export default function PackageDetailPage() {
             </Link>
           </div>
         </div>
-      </nav>
+      </div>
 
       <header className="container mx-auto px-3 md:px-4 py-3 md:py-6">
         <div className="relative rounded-xl md:rounded-2xl lg:rounded-3xl overflow-hidden bg-gradient-to-br from-gray-900 to-gray-700 shadow-2xl group">
