@@ -60,7 +60,7 @@ export default function Header() {
             <div className="relative w-14 h-14 md:w-16 md:h-16">
               <Image
                 src="https://theqapp.com/_next/image?url=%2Fimages%2Fq_app_logo_1.png&w=1920&q=75"
-                alt="theQapp Logo"
+                alt="theQapp - Birthday Party Booking Platform"
                 width={64}
                 height={64}
                 className="object-contain"

@@ -17,6 +17,12 @@ export default function middleware(request) {
   }
   
   const response = intlMiddleware(request);
+
+  const maybeLocale = pathname.split('/').filter(Boolean)[0];
+  const locale = maybeLocale === 'en' || maybeLocale === 'ar' ? maybeLocale : 'ar';
+  response.headers.set('x-locale', locale);
+  response.headers.set('x-pathname', pathname);
+
   return response;
 }
 

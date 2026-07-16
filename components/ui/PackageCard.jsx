@@ -135,7 +135,7 @@ export default function PackageCard({
             <>
               <img 
                 src={imageUrl} 
-                alt={venueName}
+                alt={`${venueName}${cityName ? ` - ${cityName}` : ''} | theQapp`}
                 className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                 onError={(e) => {
                   e.target.style.display = 'none';

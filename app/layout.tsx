@@ -1,8 +1,17 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Header from "../components/ui/Header";
 import Footer from "../components/ui/Footer";
+import JsonLd from "../components/seo/JsonLd";
+import {
+  SITE_URL,
+  SITE_NAME,
+  DEFAULT_OG_IMAGE,
+  organizationSchema,
+  websiteSchema,
+} from "../lib/seo";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,58 +23,76 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// ============================================
-// تحسين SEO المتقدم - أفضل منصة حفلات
-// ============================================
 export const metadata: Metadata = {
   title: {
-    template: '%s | theQapp',
-    default: 'theQapp - أفضل منصة لحفلات أعياد الميلاد في السعودية والإمارات',
+    template: `%s | ${SITE_NAME}`,
+    default:
+      "theQapp - أفضل منصة لحفلات أعياد الميلاد في السعودية والإمارات",
   },
-  description: 'theQapp هي المنصة الأولى لحفلات أعياد الميلاد والفعاليات العائلية في السعودية والإمارات. أكثر من 1,000,000 حجز ناجح. اكتشف أفضل الباقات واحجز الآن!',
-  keywords: 'حفلات أطفال, باقات حفلات, أماكن ترفيهية, حجوزات أطفال, فعاليات أطفال, حفلات عيد ميلاد, منصة حفلات, theQapp, QiDZ, best birthday party platform, kids parties, birthday party packages, entertainment venues, children bookings, kids events, birthday parties, family activities, birthday party planner, event planning, Saudi Arabia birthday parties, UAE birthday parties, Riyadh birthday parties, Jeddah birthday parties, Dubai birthday parties',
-  applicationName: 'theQapp',
-  authors: [{ name: 'theQapp', url: 'https://theqapp.com' }],
-  creator: 'theQapp',
-  publisher: 'theQapp',
+  description:
+    "theQapp هي المنصة الأولى لحجز حفلات أعياد الميلاد والفعاليات العائلية في السعودية والإمارات. أكثر من 1,000,000 حجز ناجح. اكتشف أفضل الباقات واحجز الآن!",
+  keywords: [
+    "حفلات أعياد ميلاد",
+    "حجز حفلة عيد ميلاد",
+    "باقات حفلات أطفال",
+    "أماكن ترفيهية",
+    "حفلات أطفال الرياض",
+    "حفلات جدة",
+    "حفلات دبي",
+    "birthday parties",
+    "birthday party booking",
+    "kids birthday parties",
+    "Saudi Arabia",
+    "UAE",
+    "theQapp",
+  ],
+  applicationName: SITE_NAME,
+  authors: [{ name: SITE_NAME, url: SITE_URL }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
   formatDetection: {
     email: false,
     address: false,
     telephone: false,
   },
-  metadataBase: new URL('https://theqapp.com'),
+  metadataBase: new URL(SITE_URL),
   alternates: {
-    canonical: '/',
+    canonical: "/",
     languages: {
-      'ar': '/ar',
-      'en': '/en',
+      ar: "/ar",
+      en: "/en",
+      "x-default": "/ar",
     },
   },
   openGraph: {
-    title: 'theQapp - أفضل منصة لحفلات أعياد الميلاد في السعودية والإمارات',
-    description: 'اكتشف أفضل باقات حفلات أعياد الميلاد في السعودية والإمارات. أكثر من 1,000,000 حجز ناجح. احجز الآن واستمتع بتجربة لا تنسى مع theQapp.',
-    url: 'https://theqapp.com',
-    siteName: 'theQapp',
+    title:
+      "theQapp - أفضل منصة لحفلات أعياد الميلاد في السعودية والإمارات",
+    description:
+      "اكتشف أفضل باقات حفلات أعياد الميلاد في السعودية والإمارات. أكثر من 1,000,000 حجز ناجح. احجز الآن مع theQapp.",
+    url: SITE_URL,
+    siteName: SITE_NAME,
     images: [
       {
-        url: '/images/og-image.jpg',
+        url: DEFAULT_OG_IMAGE,
         width: 1200,
         height: 630,
-        alt: 'theQapp - أفضل منصة لحفلات أعياد الميلاد في السعودية والإمارات',
-        type: 'image/jpeg',
+        alt: "theQapp - Birthday Party Booking Platform",
+        type: "image/png",
       },
     ],
-    locale: 'ar_SA',
-    alternateLocale: ['en_US'],
-    type: 'website',
+    locale: "ar_SA",
+    alternateLocale: ["en_US"],
+    type: "website",
   },
   twitter: {
-    card: 'summary_large_image',
-    title: 'theQapp - أفضل منصة لحفلات أعياد الميلاد في السعودية والإمارات',
-    description: 'اكتشف أفضل باقات حفلات أعياد الميلاد في السعودية والإمارات. أكثر من 1,000,000 حجز ناجح.',
-    images: ['/images/og-image.jpg'],
-    site: '@theqapp',
-    creator: '@theqapp',
+    card: "summary_large_image",
+    title:
+      "theQapp - أفضل منصة لحفلات أعياد الميلاد في السعودية والإمارات",
+    description:
+      "اكتشف أفضل باقات حفلات أعياد الميلاد في السعودية والإمارات. أكثر من 1,000,000 حجز ناجح.",
+    images: [DEFAULT_OG_IMAGE],
+    site: "@theqapp",
+    creator: "@theqapp",
   },
   robots: {
     index: true,
@@ -73,46 +100,50 @@ export const metadata: Metadata = {
     googleBot: {
       index: true,
       follow: true,
-      'max-video-preview': -1,
-      'max-image-preview': 'large',
-      'max-snippet': -1,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
     },
   },
-  verification: {
-    google: 'your-google-verification-code',
+  category: "entertainment",
+  classification: "Family Entertainment & Birthday Party Booking Platform",
+  other: {
+    "geo.region": "SA-AE",
+    "geo.placename": "Saudi Arabia, United Arab Emirates",
   },
-  category: 'entertainment',
-  classification: 'Family Entertainment Platform',
 };
 
-// ============================================
-// تحسين الـ Viewport
-// ============================================
 export const viewport: Viewport = {
-  width: 'device-width',
+  width: "device-width",
   initialScale: 1,
   maximumScale: 5,
   userScalable: true,
-  themeColor: '#023d6d',
+  themeColor: "#023d6d",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const headersList = await headers();
+  const locale = headersList.get("x-locale") === "en" ? "en" : "ar";
+  const dir = locale === "ar" ? "rtl" : "ltr";
+
   return (
     <html
-      lang="ar"
-      dir="rtl"
+      lang={locale}
+      dir={dir}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+      <body
+        className={`min-h-full flex flex-col ${locale === "ar" ? "font-sans-ar" : "font-sans-en"}`}
+        suppressHydrationWarning
+      >
+        <JsonLd data={[organizationSchema(), websiteSchema(locale)]} />
         <Header />
-        <main className="flex-grow">
-          {children}
-        </main>
+        <main className="flex-grow">{children}</main>
         <Footer />
       </body>
     </html>

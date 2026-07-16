@@ -1,5 +1,42 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { supabase } from '@/lib/supabase';
+import {
+  SITE_NAME,
+  SITE_URL,
+  DEFAULT_OG_IMAGE,
+  pageCopy,
+} from '@/lib/seo';
+
+export const metadata: Metadata = {
+  title: {
+    absolute: `${SITE_NAME} | Book Birthday Parties in Saudi Arabia & UAE`,
+  },
+  description: pageCopy.home.en.description,
+  keywords: pageCopy.home.en.keywords,
+  alternates: {
+    canonical: SITE_URL,
+    languages: {
+      ar: `${SITE_URL}/ar`,
+      en: `${SITE_URL}/en`,
+      'x-default': `${SITE_URL}/ar`,
+    },
+  },
+  openGraph: {
+    title: `${SITE_NAME} | Book Birthday Parties in Saudi Arabia & UAE`,
+    description: pageCopy.home.en.description,
+    url: SITE_URL,
+    siteName: SITE_NAME,
+    images: [{ url: DEFAULT_OG_IMAGE, width: 1200, height: 630 }],
+    locale: 'en_US',
+    alternateLocale: ['ar_SA'],
+    type: 'website',
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
+};
 
 export default async function Home() {
   const [
