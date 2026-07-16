@@ -53,17 +53,22 @@ export default function Header() {
 
   return (
     <header className="bg-white shadow-md sticky top-0 z-50">
-      <div className="container mx-auto px-4 py-3 md:py-3.5">
-        <div className="flex items-center justify-between">
-          {/* اللوجو - تكبير الحجم */}
-          <Link href={`/${locale}`} className="flex items-center gap-2 flex-shrink-0">
-            <div className="relative w-14 h-14 md:w-16 md:h-16">
+      <div className="container mx-auto px-4 py-2 md:py-2.5">
+        {/* dir=ltr keeps logo on the left in both Arabic and English */}
+        <div className="flex items-center justify-between" dir="ltr">
+          {/* اللوجو - دائماً على اليسار */}
+          <Link
+            href={`/${locale}`}
+            className="flex items-center gap-2 flex-shrink-0"
+            dir="ltr"
+          >
+            <div className="relative w-16 h-16 md:w-[4.5rem] md:h-[4.5rem]">
               <Image
                 src="https://theqapp.com/_next/image?url=%2Fimages%2Fq_app_logo_1.png&w=1920&q=75"
                 alt="theQapp - Birthday Party Booking Platform"
-                width={64}
-                height={64}
-                className="object-contain"
+                width={72}
+                height={72}
+                className="object-contain w-full h-full"
                 priority
               />
             </div>
@@ -71,12 +76,12 @@ export default function Header() {
           </Link>
 
           {/* القائمة - للشاشات الكبيرة */}
-          <nav className="hidden md:flex items-center gap-6">
+          <nav className="hidden md:flex items-center gap-6" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
             {navItems.map((item) => (
               <Link
                 key={item.key}
                 href={item.href}
-                className={`text-gray-600 hover:text-primary transition font-medium text-sm ${
+                className={`text-gray-600 hover:text-primary transition font-medium text-base ${
                   pathname === item.href ? 'text-primary font-bold' : ''
                 }`}
               >
@@ -102,14 +107,14 @@ export default function Header() {
 
         {/* القائمة المنسدلة للهواتف */}
         {isMenuOpen && (
-          <div className="md:hidden mt-3 pt-3 border-t border-gray-100">
+          <div className="md:hidden mt-2.5 pt-2.5 border-t border-gray-100">
             <nav className="flex flex-col gap-2">
               {navItems.map((item) => (
                 <Link
                   key={item.key}
                   href={item.href}
                   onClick={() => setIsMenuOpen(false)}
-                  className={`text-gray-600 hover:text-primary transition font-medium text-sm py-2 px-3 rounded-lg hover:bg-gray-50 ${
+                  className={`text-gray-600 hover:text-primary transition font-medium text-base py-2 px-3 rounded-lg hover:bg-gray-50 ${
                     pathname === item.href ? 'text-primary font-bold bg-gray-50' : ''
                   }`}
                 >
