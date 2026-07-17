@@ -72,7 +72,13 @@ export default function Header() {
                 priority
               />
             </div>
-            <span className="font-bold text-xl md:text-2xl text-primary">theQapp</span>
+            <span
+              className="font-sans-en font-bold text-xl md:text-2xl text-primary tracking-tight"
+              lang="en"
+              dir="ltr"
+            >
+              theQapp
+            </span>
           </Link>
 
           {/* القائمة - للشاشات الكبيرة */}
