@@ -12,6 +12,7 @@ import {
   ExternalLink, MessageCircle, ThumbsUp, Eye, ChevronDown, HelpCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { formatWorkingHours } from '@/lib/utils';
 import WhatsAppPopup from '@/components/ui/WhatsAppPopup';
 
 export default function PackageClient() {
@@ -1375,7 +1376,7 @@ export default function PackageClient() {
                           <div className="mt-1.5 md:mt-2 pt-1.5 md:pt-2 border-t border-gray-100">
                             <span className="text-[10px] md:text-xs text-gray-400 flex items-center gap-0.5 md:gap-1">
                               <Clock size={8} className="md:w-[10px] md:h-[10px]" />
-                              {branch.working_hours}
+                              {formatWorkingHours(branch.working_hours, locale, true)}
                             </span>
                           </div>
                         )}
@@ -1411,9 +1412,9 @@ export default function PackageClient() {
                             </a>
                           )}
                           {selectedBranch.working_hours && (
-                            <span className="text-xs md:text-sm text-gray-500 flex items-center gap-1 md:gap-1.5">
+                            <span className="text-xs md:text-sm text-gray-500 flex items-center gap-1 md:gap-1.5 whitespace-pre-line">
                               <Clock size={12} className="md:w-[14px] md:h-[14px]" />
-                              {selectedBranch.working_hours}
+                              {formatWorkingHours(selectedBranch.working_hours, locale)}
                             </span>
                           )}
                         </div>
@@ -1670,7 +1671,9 @@ export default function PackageClient() {
                       {selectedBranch.working_hours && (
                         <p className="flex items-center gap-1.5 md:gap-2">
                           <Clock size={14} className="md:w-[16px] md:h-[16px] text-primary" />
-                          <span>{selectedBranch.working_hours}</span>
+                          <span className="whitespace-pre-line">
+                            {formatWorkingHours(selectedBranch.working_hours, locale)}
+                          </span>
                         </p>
                       )}
                     </>

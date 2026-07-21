@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { MapPin, Phone, Clock, ArrowLeft, Users, Star, Building, Calendar, ChevronRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { formatWorkingHours } from '@/lib/utils';
 // ❌ حذف: import Header from '@/components/ui/Header';
 // ❌ حذف: import Footer from '@/components/ui/Footer';
 import WhatsAppPopup from '@/components/ui/WhatsAppPopup';
@@ -367,7 +368,9 @@ export default function BranchesPage() {
                             <Clock size={18} className="text-primary flex-shrink-0 mt-0.5" />
                             <div>
                               <span className="text-xs text-gray-400 block">{t.workingHours}</span>
-                              <span className="text-sm text-gray-700">{selectedBranch.working_hours}</span>
+                              <span className="text-sm text-gray-700 whitespace-pre-line">
+                                {formatWorkingHours(selectedBranch.working_hours, locale)}
+                              </span>
                             </div>
                           </div>
                         )}

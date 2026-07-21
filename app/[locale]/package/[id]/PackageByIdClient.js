@@ -11,6 +11,7 @@ import {
   ExternalLink, MessageCircle, ThumbsUp, Eye
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { formatWorkingHours } from '@/lib/utils';
 import WhatsAppPopup from '@/components/ui/WhatsAppPopup';
 
 export default function PackageByIdClient() {
@@ -959,7 +960,7 @@ export default function PackageByIdClient() {
                           <div className="mt-2 pt-2 border-t border-gray-100">
                             <span className="text-xs text-gray-400 flex items-center gap-1">
                               <Clock size={10} />
-                              {branch.working_hours}
+                              {formatWorkingHours(branch.working_hours, locale, true)}
                             </span>
                           </div>
                         )}
@@ -996,9 +997,9 @@ export default function PackageByIdClient() {
                             </a>
                           )}
                           {selectedBranch.working_hours && (
-                            <span className="text-sm text-gray-500 flex items-center gap-1.5">
+                            <span className="text-sm text-gray-500 flex items-center gap-1.5 whitespace-pre-line">
                               <Clock size={14} />
-                              {selectedBranch.working_hours}
+                              {formatWorkingHours(selectedBranch.working_hours, locale)}
                             </span>
                           )}
                         </div>
@@ -1157,7 +1158,9 @@ export default function PackageByIdClient() {
                       {selectedBranch.working_hours && (
                         <p className="flex items-center gap-2">
                           <Clock size={16} className="text-primary" />
-                          <span>{selectedBranch.working_hours}</span>
+                          <span className="whitespace-pre-line">
+                            {formatWorkingHours(selectedBranch.working_hours, locale)}
+                          </span>
                         </p>
                       )}
                     </>
