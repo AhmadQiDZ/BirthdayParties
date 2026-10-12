@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -9,7 +9,8 @@ import {
   ChevronRight, CheckCircle, ArrowLeft, Star, Clock, Award, 
   Info, Shield, Gift, Sparkles, Crown, Tag, Percent, FileText,
   Heart, Share2, Building, X, ZoomIn, ZoomOut, Download,
-  ExternalLink, MessageCircle, ThumbsUp, Eye, ChevronDown, HelpCircle
+  ExternalLink, MessageCircle, ThumbsUp, Eye, ChevronDown, HelpCircle,
+  Play, Video, Pause, Volume2, VolumeX
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
@@ -19,7 +20,6 @@ import {
   parseBranchRecord,
 } from '@/lib/utils';
 import WhatsAppPopup from '@/components/ui/WhatsAppPopup';
-// استيراد مكون PackageCard لعرض الباقات المشابهة
 import PackageCard from '@/components/ui/PackageCard';
 
 export default function PackageClient() {
@@ -29,10 +29,8 @@ export default function PackageClient() {
   
   const locale = params?.locale || 'ar';
   
-  // استخراج citySlug مع التعامل مع قيمة "undefined"
   let citySlug = params?.city || params?.slug || '';
   
-  // إذا كانت القيمة "undefined" كـ string، حاول استخراجها من الرابط
   if (citySlug === 'undefined' || citySlug === 'null' || !citySlug) {
     try {
       const pathParts = window.location.pathname.split('/');
@@ -55,7 +53,6 @@ export default function PackageClient() {
     console.log('⚠️ Could not decode package slug, using original:', packageSlug);
   }
   
-  // إذا كان packageSlug هو "undefined"، حاول استخراجه من الرابط
   if (packageSlug === 'undefined' || packageSlug === 'null' || !packageSlug) {
     try {
       const pathParts = window.location.pathname.split('/');
@@ -89,7 +86,8 @@ export default function PackageClient() {
   const [isFavorite, setIsFavorite] = useState(false);
   const [bookingError, setBookingError] = useState('');
   
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  // ✅ معرض الوسائط (صور + فيديو)
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
   const [touchStart, setTouchStart] = useState(0);
@@ -97,7 +95,12 @@ export default function PackageClient() {
   const [imageLoading, setImageLoading] = useState(true);
   const modalRef = useRef(null);
   
-  // ===== ✅ حالة الأسئلة الشائعة =====
+  // ✅ حالة الفيديو
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoMuted, setVideoMuted] = useState(true);
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  const videoRef = useRef(null);
+  
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
   const [showAllReviews, setShowAllReviews] = useState(false);
   
@@ -187,14 +190,30 @@ export default function PackageClient() {
     }
   }, [selectedBranch, packageData?.package_tiers, branches.length, selectedTier?.id]);
 
-  // ============================================
-  // جلب الباقة فقط ثم الحصول على المدينة منها
-  // ============================================
+  // ✅ إيقاف الفيديو عند تغيير الوسائط
+  useEffect(() => {
+    if (videoRef.current && currentMediaIndex !== undefined) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+      setVideoPlaying(false);
+    }
+  }, [currentMediaIndex]);
+
+  // ✅ Escape لإغلاق النافذة
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape' && isImageModalOpen) setIsImageModalOpen(false);
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', handleEsc);
+      return () => window.removeEventListener('keydown', handleEsc);
+    }
+  }, [isImageModalOpen]);
+
   async function fetchPackageBySlugOnly() {
     try {
       console.log('🔍 Trying to find package by slug only:', packageSlug);
       
-      // جلب جميع الباقات النشطة
       const { data: packagesList, error } = await supabase
         .from('packages')
         .select(`
@@ -211,50 +230,33 @@ export default function PackageClient() {
         return;
       }
 
-      // البحث عن الباقة بالـ slug حسب اللغة
       let foundPackage = null;
       
       if (packagesList && packagesList.length > 0) {
-        // محاولة مطابقة الـ slug حسب اللغة
         const slugField = locale === 'ar' ? 'slug_ar' : 'slug_en';
         
         foundPackage = packagesList.find(pkg => {
-          // 1. مطابقة slug حسب اللغة
           if (pkg[slugField] === packageSlug) return true;
-          
-          // 2. مطابقة slug العادي
           if (pkg.slug === packageSlug) return true;
-          
-          // 3. مطابقة الاسم المحول إلى slug (العربي أو الإنجليزي حسب اللغة)
           const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
           const pkgSlug = createSlug(pkgName);
           if (pkgSlug === packageSlug) return true;
-          
-          // 4. مطابقة slug_ar أو slug_en باستخدام contains
           if (pkg.slug_ar && packageSlug.includes(pkg.slug_ar)) return true;
           if (pkg.slug_en && packageSlug.includes(pkg.slug_en)) return true;
-          
-          // 5. مطابقة بعد تطبيع الحروف العربية
           if (compareSlugs(pkgSlug, packageSlug)) return true;
-          
-          // 6. مطابقة الاسم الكامل مع استبدال الشرطات بمسافات
           const normalizedPkgName = pkgName?.toLowerCase().trim().replace(/\s+/g, '-') || '';
           const normalizedPackageSlug = packageSlug.replace(/-/g, ' ');
           if (normalizedPkgName === normalizedPackageSlug) return true;
           if (normalizedPkgName === packageSlug) return true;
-          
-          // 7. مطابقة جزء من الاسم
           const searchTerms = packageSlug.replace(/-/g, ' ').toLowerCase().split(' ');
           const nameTerms = pkgName?.toLowerCase().split(' ') || [];
           const matchCount = searchTerms.filter(term => 
             nameTerms.some(nameTerm => nameTerm.includes(term) || term.includes(nameTerm))
           ).length;
           if (matchCount >= Math.min(searchTerms.length, 2)) return true;
-          
           return false;
         });
 
-        // إذا لم يتم العثور، محاولة البحث بالاسم
         if (!foundPackage) {
           const packageName = packageSlug.replace(/-/g, ' ');
           foundPackage = packagesList.find(pkg => {
@@ -263,7 +265,6 @@ export default function PackageClient() {
           });
         }
         
-        // إذا لم يتم العثور، محاولة البحث في الاسم العربي والإنجليزي معاً
         if (!foundPackage) {
           const packageName = packageSlug.replace(/-/g, ' ');
           foundPackage = packagesList.find(pkg => {
@@ -281,7 +282,6 @@ export default function PackageClient() {
         return;
       }
 
-      // الحصول على المدينة من الباقة
       const citySlugFromPackage = foundPackage.cities?.slug || 
                                   foundPackage.cities?.slug_ar || 
                                   foundPackage.cities?.slug_en ||
@@ -295,12 +295,10 @@ export default function PackageClient() {
 
       console.log('✅ Found package in city:', citySlugFromPackage);
       
-      // الحصول على الـ slug الصحيح للباقة حسب اللغة
       const correctPackageSlug = locale === 'ar' 
         ? (foundPackage.slug_ar || createSlug(foundPackage.venue_name_ar))
         : (foundPackage.slug_en || createSlug(foundPackage.venue_name_en));
       
-      // إعادة التوجيه إلى الرابط الصحيح مع المدينة
       const newPath = `/${locale}/${citySlugFromPackage}/${correctPackageSlug}`;
       console.log('🔄 Redirecting to:', newPath);
       router.replace(newPath);
@@ -311,9 +309,6 @@ export default function PackageClient() {
     }
   }
 
-  // ============================================
-  // جلب بيانات الباقة
-  // ============================================
   async function fetchPackageData() {
     setLoading(true);
     setPackageData(null);
@@ -323,10 +318,12 @@ export default function PackageClient() {
     setSelectedTier(null);
     setSimilarPackages([]);
     setReviews([]);
-    setCurrentImageIndex(0);
+    setCurrentMediaIndex(0);
     setImageLoading(true);
     setIsImageModalOpen(false);
     setIsZoomed(false);
+    setVideoPlaying(false);
+    setVideoLoaded(false);
     setSubmitted(false);
     setBookingError('');
     setOpenFaqIndex(null);
@@ -339,12 +336,10 @@ export default function PackageClient() {
         return;
       }
 
-      // ========== جلب المدينة ==========
       let city = null;
       
       console.log('🔍 Searching for city with slug:', citySlug);
       
-      // محاولة البحث باستخدام العمود slug أولاً
       const { data: cityBySlug, error: errorBySlug } = await supabase
         .from('cities')
         .select('*')
@@ -355,7 +350,6 @@ export default function PackageClient() {
         city = cityBySlug;
         console.log('✅ City found by slug:', city.name_ar);
       } else {
-        // إذا لم يتم العثور، حاول البحث باستخدام slug_ar أو slug_en حسب اللغة
         const slugColumn = locale === 'ar' ? 'slug_ar' : 'slug_en';
         console.log('🔍 Trying with column:', slugColumn);
         const { data: cityByLangSlug, error: errorByLangSlug } = await supabase
@@ -368,7 +362,6 @@ export default function PackageClient() {
           city = cityByLangSlug;
           console.log('✅ City found by language slug:', city.name_ar);
         } else {
-          // محاولة البحث باستخدام الاسم
           const nameColumn = locale === 'ar' ? 'name_ar' : 'name_en';
           const searchName = citySlug.replace(/-/g, ' ');
           console.log('🔍 Trying with name:', searchName);
@@ -382,7 +375,6 @@ export default function PackageClient() {
             city = cityByName;
             console.log('✅ City found by name:', city.name_ar);
           } else {
-            // محاولة البحث باستخدام LIKE
             console.log('🔍 Trying LIKE search...');
             const { data: cityByLike, error: errorByLike } = await supabase
               .from('cities')
@@ -412,7 +404,6 @@ export default function PackageClient() {
 
       setCityData(city);
 
-      // ========== جلب الباقات ==========
       const { data: packagesList, error: packagesError } = await supabase
         .from('packages')
         .select(`
@@ -430,28 +421,23 @@ export default function PackageClient() {
         return;
       }
 
-      // ========== البحث عن الباقة المطلوبة ==========
       let foundPackage = null;
       
       if (packagesList && packagesList.length > 0) {
-        // تحديد الحقل المناسب للبحث حسب اللغة
         const slugField = locale === 'ar' ? 'slug_ar' : 'slug_en';
         
         console.log('🔍 Searching for package with slug:', packageSlug);
         console.log('🔍 Using slug field:', slugField);
         
-        // 1. محاولة مطابقة الـ slug حسب اللغة (الأفضل)
         foundPackage = packagesList.find(pkg => pkg[slugField] === packageSlug);
         
         if (foundPackage) {
           console.log('✅ Package found by language-specific slug:', slugField, '=', packageSlug);
         } else {
-          // 2. محاولة مطابقة الـ slug العادي
           foundPackage = packagesList.find(pkg => pkg.slug === packageSlug);
           if (foundPackage) {
             console.log('✅ Package found by generic slug');
           } else {
-            // 3. محاولة مطابقة الاسم المحول إلى slug
             foundPackage = packagesList.find(pkg => {
               const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
               const pkgSlug = createSlug(pkgName);
@@ -460,7 +446,6 @@ export default function PackageClient() {
             if (foundPackage) {
               console.log('✅ Package found by generated slug from name');
             } else {
-              // 4. محاولة مطابقة slug_ar أو slug_en باستخدام contains
               foundPackage = packagesList.find(pkg => {
                 if (pkg.slug_ar && packageSlug.includes(pkg.slug_ar)) return true;
                 if (pkg.slug_en && packageSlug.includes(pkg.slug_en)) return true;
@@ -469,7 +454,6 @@ export default function PackageClient() {
               if (foundPackage) {
                 console.log('✅ Package found by slug contains match');
               } else {
-                // 5. محاولة مطابقة بعد تطبيع الحروف العربية
                 foundPackage = packagesList.find(pkg => {
                   const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
                   const pkgSlug = createSlug(pkgName);
@@ -478,7 +462,6 @@ export default function PackageClient() {
                 if (foundPackage) {
                   console.log('✅ Package found by normalized slug');
                 } else {
-                  // 6. محاولة مطابقة الاسم الكامل
                   const packageName = packageSlug.replace(/-/g, ' ');
                   foundPackage = packagesList.find(pkg => {
                     const name = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
@@ -487,7 +470,6 @@ export default function PackageClient() {
                   if (foundPackage) {
                     console.log('✅ Package found by name match');
                   } else {
-                    // 7. محاولة البحث في الاسم العربي والإنجليزي معاً
                     const packageName = packageSlug.replace(/-/g, ' ');
                     foundPackage = packagesList.find(pkg => {
                       const nameAr = pkg.venue_name_ar || '';
@@ -498,7 +480,6 @@ export default function PackageClient() {
                     if (foundPackage) {
                       console.log('✅ Package found by name match (AR/EN)');
                     } else {
-                      // 8. محاولة البحث باستخدام LIKE على slug_ar و slug_en
                       console.log('🔍 Trying LIKE search on slugs...');
                       const { data: likeResult, error: likeError } = await supabase
                         .from('packages')
@@ -528,25 +509,20 @@ export default function PackageClient() {
 
       if (!foundPackage) {
         console.error('❌ Package not found in city:', packageSlug);
-        // محاولة البحث عن الباقة في جميع المدن
         await fetchPackageBySlugOnly();
         setLoading(false);
         return;
       }
 
-      // التحقق من أن المدينة في الباقة تطابق citySlug
       const packageCitySlug = foundPackage.cities?.slug || 
                              foundPackage.cities?.slug_ar || 
                              foundPackage.cities?.slug_en ||
                              foundPackage.cities?.name_en?.toLowerCase().replace(/\s+/g, '-');
       
-      // إذا كانت المدينة مختلفة، قم بإعادة التوجيه
       if (packageCitySlug && packageCitySlug !== citySlug) {
-        // التحقق مما إذا كانت المدينة متطابقة بعد التطبيع
         const isMatching = compareSlugs(packageCitySlug, citySlug);
         if (!isMatching) {
           console.log('🔄 Package belongs to different city, redirecting...');
-          // الحصول على الـ slug الصحيح للباقة حسب اللغة
           const correctSlug = locale === 'ar' 
             ? (foundPackage.slug_ar || createSlug(foundPackage.venue_name_ar))
             : (foundPackage.slug_en || createSlug(foundPackage.venue_name_en));
@@ -558,8 +534,29 @@ export default function PackageClient() {
       }
 
       console.log('✅ Package found:', foundPackage.venue_name_ar || foundPackage.venue_name_en);
-      setPackageData(foundPackage);
-      await loadPackageDetails(foundPackage);
+      console.log('🎥 video_url from DB:', foundPackage.video_url);
+      
+      // ✅ ضمان جلب video_url حتى لو لم يُرجع * العمود
+      let videoUrl = foundPackage?.video_url || null;
+      
+      if (!videoUrl && foundPackage?.id) {
+        const { data: videoData } = await supabase
+          .from('packages')
+          .select('video_url')
+          .eq('id', foundPackage.id)
+          .single();
+        
+        if (videoData?.video_url) {
+          videoUrl = videoData.video_url;
+          console.log('🎥 video_url (fallback fetch):', videoUrl);
+        }
+      }
+      
+      const enrichedPackage = { ...foundPackage, video_url: videoUrl };
+      console.log('📦 Enriched package:', enrichedPackage.venue_name_ar, '| video:', videoUrl);
+      
+      setPackageData(enrichedPackage);
+      await loadPackageDetails(enrichedPackage);
       
     } catch (err) {
       console.error('❌ Error fetching package data:', err);
@@ -568,9 +565,6 @@ export default function PackageClient() {
     }
   }
 
-  // ============================================
-  // تحميل تفاصيل الباقة
-  // ============================================
   async function loadPackageDetails(pkg) {
     if (!pkg) return;
 
@@ -606,9 +600,6 @@ export default function PackageClient() {
 
     setReviews(reviewsData || []);
     
-    // ============================================
-    // ✅ جلب الباقات المشابهة (Similar Packages)
-    // ============================================
     if (pkg.city_id) {
       const { data: similar, error: similarError } = await supabase
         .from('packages')
@@ -626,7 +617,6 @@ export default function PackageClient() {
       if (similarError) {
         console.error('❌ Error fetching similar packages:', similarError);
       } else {
-        // ترتيب الباقات المشابهة حسب التقييم (الأعلى أولاً)
         const sortedSimilar = (similar || []).sort((a, b) => (b.rating || 0) - (a.rating || 0));
         setSimilarPackages(sortedSimilar);
         console.log('✅ Similar packages loaded:', sortedSimilar.length);
@@ -634,9 +624,6 @@ export default function PackageClient() {
     }
   }
 
-  // ============================================
-  // إرسال الحجز
-  // ============================================
   async function handleSubmit(e) {
     e.preventDefault();
     setBookingError('');
@@ -725,26 +712,65 @@ export default function PackageClient() {
   }
 
   // ============================================
-  // دوال معرض الصور
+  // ✅ دوال معرض الوسائط (صور + فيديو)
   // ============================================
-  const nextImage = () => {
-    if (packageData?.images?.length > 0) {
-      setCurrentImageIndex((prev) => (prev + 1) % packageData.images.length);
+  const totalMedia = useMemo(() => {
+    const imagesCount = packageData?.images?.length || 0;
+    const hasVid = !!packageData?.video_url;
+    return imagesCount + (hasVid ? 1 : 0);
+  }, [packageData?.images, packageData?.video_url]);
+
+  const mediaItems = useMemo(() => {
+    const imgs = packageData?.images || [];
+    const items = imgs.map((img, idx) => ({ type: 'image', src: img, index: idx }));
+    if (packageData?.video_url) {
+      items.push({ type: 'video', src: packageData.video_url });
+    }
+    return items;
+  }, [packageData?.images, packageData?.video_url]);
+
+  const currentMedia = mediaItems[currentMediaIndex];
+  const isCurrentVideo = currentMedia?.type === 'video';
+
+  const nextMedia = useCallback(() => {
+    if (totalMedia > 0) {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      }
+      setVideoPlaying(false);
+      setCurrentMediaIndex((prev) => (prev + 1) % totalMedia);
       setImageLoading(true);
     }
-  };
+  }, [totalMedia]);
 
-  const prevImage = () => {
-    if (packageData?.images?.length > 0) {
-      setCurrentImageIndex((prev) => (prev - 1 + packageData.images.length) % packageData.images.length);
+  const prevMedia = useCallback(() => {
+    if (totalMedia > 0) {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      }
+      setVideoPlaying(false);
+      setCurrentMediaIndex((prev) => (prev - 1 + totalMedia) % totalMedia);
       setImageLoading(true);
     }
-  };
+  }, [totalMedia]);
 
-  const goToImage = (index) => {
-    setCurrentImageIndex(index);
+  const goToMedia = (index) => {
+    if (index === currentMediaIndex) return;
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+    setVideoPlaying(false);
+    setCurrentMediaIndex(index);
     setImageLoading(true);
   };
+
+  // للتوافق مع الكود الأصلي
+  const nextImage = nextMedia;
+  const prevImage = prevMedia;
+  const goToImage = goToMedia;
 
   const toggleZoom = () => {
     setIsZoomed(!isZoomed);
@@ -760,17 +786,56 @@ export default function PackageClient() {
 
   const handleTouchEnd = () => {
     if (touchStart - touchEnd > 50) {
-      nextImage();
+      nextMedia();
     }
     if (touchStart - touchEnd < -50) {
-      prevImage();
+      prevMedia();
     }
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') setIsImageModalOpen(false);
-    if (e.key === 'ArrowRight') nextImage();
-    if (e.key === 'ArrowLeft') prevImage();
+    if (e.key === 'ArrowRight') nextMedia();
+    if (e.key === 'ArrowLeft') prevMedia();
+  };
+
+  // ✅ دوال التحكم بالفيديو
+  const toggleVideoPlay = () => {
+    if (!videoRef.current) return;
+    if (videoPlaying) {
+      videoRef.current.pause();
+      setVideoPlaying(false);
+    } else {
+      videoRef.current.play();
+      setVideoPlaying(true);
+    }
+  };
+
+  const toggleVideoMute = () => {
+    if (!videoRef.current) return;
+    videoRef.current.muted = !videoMuted;
+    setVideoMuted(!videoMuted);
+  };
+
+  // ✅ كشف نوع الفيديو
+  const getVideoType = (url) => {
+    if (!url) return 'unknown';
+    if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
+    if (url.includes('vimeo.com')) return 'vimeo';
+    return 'direct';
+  };
+
+  const getYouTubeId = (url) => {
+    if (!url) return null;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
+
+  const getVimeoId = (url) => {
+    if (!url) return null;
+    const match = url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+    return match ? match[1] : null;
   };
 
   const goBack = () => {
@@ -806,20 +871,15 @@ export default function PackageClient() {
   const embedUrl = convertToEmbedUrl(mapUrl);
   const currencySymbol = getCurrencySymbol(packageData?.currency || 'SAR');
 
-  // ===== ✅ الحصول على بيانات الأسئلة الشائعة حسب اللغة =====
   const faqData = locale === 'ar' 
     ? (packageData?.faq_ar || []) 
     : (packageData?.faq_en || []);
   const hasFaq = faqData.length > 0;
 
-  // ===== ✅ دالة تبديل حالة السؤال =====
   const toggleFaq = (index) => {
     setOpenFaqIndex(openFaqIndex === index ? null : index);
   };
 
-  // ============================================
-  // النصوص
-  // ============================================
   const texts = {
     ar: {
       pageTitle: 'تفاصيل الباقة',
@@ -871,12 +931,21 @@ export default function PackageClient() {
       backToCity: 'العودة للمدينة',
       share: 'مشاركة',
       favorite: 'إضافة للمفضلة',
-      images: 'معرض الصور',
+      images: 'معرض الوسائط',
       noImages: 'لا توجد صور متاحة',
       closeGallery: 'إغلاق المعرض',
       downloadImage: 'تحميل الصورة',
       zoomIn: 'تكبير',
       zoomOut: 'تصغير',
+      // ✅ نصوص الفيديو
+      video: 'فيديو',
+      videoBadge: 'فيديو',
+      playVideo: 'تشغيل الفيديو',
+      pauseVideo: 'إيقاف الفيديو',
+      muteVideo: 'كتم الصوت',
+      unmuteVideo: 'تشغيل الصوت',
+      videoNotSupported: 'متصفحك لا يدعم تشغيل الفيديو',
+      videoTitle: 'فيديو تعريفي',
       error: 'حدث خطأ',
       requiredField: 'هذا الحقل مطلوب'
     },
@@ -930,12 +999,21 @@ export default function PackageClient() {
       backToCity: 'Back to City',
       share: 'Share',
       favorite: 'Add to Favorites',
-      images: 'Image Gallery',
+      images: 'Media Gallery',
       noImages: 'No images available',
       closeGallery: 'Close Gallery',
       downloadImage: 'Download Image',
       zoomIn: 'Zoom In',
       zoomOut: 'Zoom Out',
+      // ✅ New video texts
+      video: 'Video',
+      videoBadge: 'Video',
+      playVideo: 'Play Video',
+      pauseVideo: 'Pause Video',
+      muteVideo: 'Mute',
+      unmuteVideo: 'Unmute',
+      videoNotSupported: 'Your browser does not support video playback',
+      videoTitle: 'Introductory Video',
       error: 'Error',
       requiredField: 'This field is required'
     }
@@ -943,9 +1021,6 @@ export default function PackageClient() {
 
   const t = texts[locale] || texts.ar;
 
-  // ============================================
-  // حالات التحميل والأخطاء
-  // ============================================
   if (!citySlug || citySlug === 'undefined' || citySlug === 'null') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 px-4">
@@ -1004,16 +1079,14 @@ export default function PackageClient() {
     );
   }
 
-  // ============================================
-  // المتغيرات المحسوبة
-  // ============================================
   const venueName = locale === 'ar' ? packageData.venue_name_ar : packageData.venue_name_en;
   const description = locale === 'ar' ? packageData.description_ar : packageData.description_en;
   const terms = locale === 'ar' ? packageData.terms_ar : packageData.terms_en;
   const cityName = locale === 'ar' ? cityData.name_ar : cityData.name_en;
-  const hasImages = packageData.images && packageData.images.length > 0;
   const images = packageData.images || [];
-  const safeImageIndex = hasImages ? Math.min(currentImageIndex, images.length - 1) : 0;
+  const hasImages = images.length > 0;
+  const hasMedia = totalMedia > 0;
+  const safeImageIndex = hasImages ? Math.min(currentMediaIndex, images.length - 1) : 0;
   const minPrice = packageData.package_tiers?.length > 0 
     ? Math.min(...packageData.package_tiers.map(t => t.price))
     : 0;
@@ -1026,9 +1099,6 @@ export default function PackageClient() {
     ? Math.round(((firstTier.price_before_discount - firstTier.price) / firstTier.price_before_discount) * 100)
     : 0;
 
-  // ============================================
-  // ✅ قسم الباقات المشابهة (Similar Packages)
-  // ============================================
   const renderSimilarPackages = () => {
     if (similarPackages.length === 0) return null;
 
@@ -1048,12 +1118,10 @@ export default function PackageClient() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
           {similarPackages.slice(0, 4).map((pkg) => {
-            // حساب أقل سعر للباقة المشابهة
             const pkgMinPrice = pkg.package_tiers?.length > 0 
               ? Math.min(...pkg.package_tiers.map(t => t.price))
               : 0;
             
-            // حساب الخصم للباقة المشابهة
             const firstSimilarTier = pkg.package_tiers?.[0];
             const pkgHasDiscount = firstSimilarTier?.price_before_discount > 0 && 
                                   firstSimilarTier?.price_before_discount > firstSimilarTier?.price;
@@ -1064,7 +1132,6 @@ export default function PackageClient() {
             const pkgName = locale === 'ar' ? pkg.venue_name_ar : pkg.venue_name_en;
             const pkgImage = pkg.images && pkg.images.length > 0 ? pkg.images[0] : null;
             
-            // استخدام slug حسب اللغة
             const pkgSlug = locale === 'ar' 
               ? (pkg.slug_ar || createSlug(pkgName))
               : (pkg.slug_en || createSlug(pkgName));
@@ -1075,7 +1142,6 @@ export default function PackageClient() {
             const pkgReviews = pkg.reviews_count || 0;
             const pkgHasMultipleBranches = pkg.has_multiple_branches || false;
             
-            // حساب المبلغ المدخر
             const savedAmount = pkgHasDiscount && firstSimilarTier 
               ? firstSimilarTier.price_before_discount - firstSimilarTier.price 
               : 0;
@@ -1087,7 +1153,6 @@ export default function PackageClient() {
                 prefetch={false}
                 className="group bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 flex flex-col h-full"
               >
-                {/* ===== صورة الباقة ===== */}
                 <div className="relative h-32 md:h-48 bg-gradient-to-br from-gray-100 to-gray-200 overflow-hidden flex-shrink-0">
                   {pkgImage ? (
                     <Image
@@ -1107,10 +1172,8 @@ export default function PackageClient() {
                     </div>
                   )}
                   
-                  {/* ===== طبقة التدرج ===== */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                   
-                  {/* ===== نسبة الخصم ===== */}
                   {pkgHasDiscount && pkgDiscountPercent > 0 && (
                     <div className="absolute top-2 left-2 bg-gradient-to-r from-green-500 to-green-600 text-white px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-[8px] md:text-[10px] font-bold shadow-lg flex items-center gap-0.5 md:gap-1">
                       <Percent size={8} className="md:w-[10px] md:h-[10px]" />
@@ -1118,15 +1181,21 @@ export default function PackageClient() {
                     </div>
                   )}
                   
-                  {/* ===== الفروع المتعددة ===== */}
                   {pkgHasMultipleBranches && (
                     <div className="absolute top-2 right-2 bg-primary/80 backdrop-blur-sm text-white px-1.5 md:px-2 py-0.5 rounded-full text-[8px] md:text-[10px] font-bold shadow-lg flex items-center gap-0.5 md:gap-1">
                       <Building size={8} className="md:w-[10px] md:h-[10px]" />
                       {locale === 'ar' ? 'فروع متعددة' : 'Multiple Branches'}
                     </div>
                   )}
+
+                  {/* ✅ شارة الفيديو في الباقات المشابهة */}
+                  {pkg.video_url && (
+                    <div className="absolute top-2 left-2 bg-purple-500/90 backdrop-blur-sm text-white px-1.5 md:px-2 py-0.5 rounded-full text-[8px] md:text-[10px] font-bold shadow-lg flex items-center gap-0.5 md:gap-1">
+                      <Play size={8} className="md:w-[10px] md:h-[10px] fill-white" />
+                      {t.videoBadge}
+                    </div>
+                  )}
                   
-                  {/* ===== السعر ===== */}
                   {pkgMinPrice > 0 && (
                     <div className="absolute bottom-1.5 md:bottom-2 right-1.5 md:right-2 bg-accent/90 backdrop-blur-sm text-white px-1.5 md:px-3 py-0.5 md:py-1 rounded-lg text-[10px] md:text-sm font-bold shadow-lg">
                       {pkgHasDiscount && firstSimilarTier ? (
@@ -1151,7 +1220,6 @@ export default function PackageClient() {
                     </div>
                   )}
                   
-                  {/* ===== التقييم ===== */}
                   {pkgRating > 0 && (
                     <div className="absolute bottom-1.5 md:bottom-2 left-1.5 md:left-2 bg-black/60 backdrop-blur-sm text-white px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-[8px] md:text-[10px] flex items-center gap-0.5 md:gap-1 shadow-lg">
                       <Star size={8} className="md:w-[10px] md:h-[10px] fill-yellow-400 text-yellow-400" />
@@ -1161,24 +1229,20 @@ export default function PackageClient() {
                   )}
                 </div>
                 
-                {/* ===== محتوى البطاقة ===== */}
                 <div className="p-2 md:p-4 flex-grow flex flex-col">
                   <h3 className="text-xs md:text-sm font-bold text-primary group-hover:text-accent transition line-clamp-1">
                     {pkgName}
                   </h3>
                   
-                  {/* المدينة */}
                   <div className="flex items-center gap-0.5 md:gap-1 text-gray-400 mt-0.5 md:mt-1">
                     <MapPin size={10} className="md:w-[12px] md:h-[12px]" />
                     <span className="text-[9px] md:text-xs">{cityName}</span>
                   </div>
                   
-                  {/* الوصف المختصر */}
                   <p className="text-[9px] md:text-xs text-gray-500 mt-0.5 md:mt-1 line-clamp-2 flex-grow">
                     {locale === 'ar' ? pkg.description_ar : pkg.description_en}
                   </p>
                   
-                  {/* زر عرض التفاصيل */}
                   <div className="mt-1.5 md:mt-2 pt-1.5 md:pt-2 border-t border-gray-100">
                     <span className="text-[9px] md:text-xs text-primary font-medium group-hover:text-accent transition flex items-center gap-0.5 md:gap-1">
                       {t.viewDetails}
@@ -1191,7 +1255,6 @@ export default function PackageClient() {
           })}
         </div>
         
-        {/* ===== زر عرض الكل ===== */}
         {similarPackages.length > 4 && (
           <div className="text-center mt-4 md:mt-6">
             <Link 
@@ -1207,9 +1270,6 @@ export default function PackageClient() {
     );
   };
 
-  // ============================================
-  // التصميم (UI)
-  // ============================================
   return (
     <article className="min-h-screen bg-gradient-to-br from-gray-50 to-white" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
       
@@ -1259,119 +1319,288 @@ export default function PackageClient() {
 
       <header className="container mx-auto px-3 md:px-4 py-3 md:py-6">
         <div className="relative rounded-xl md:rounded-2xl lg:rounded-3xl overflow-hidden bg-gradient-to-br from-gray-900 to-gray-700 shadow-2xl group">
-          {hasImages ? (
+          {hasMedia ? (
             <>
               <div className="relative aspect-[16/9] md:aspect-[21/9] lg:aspect-[21/8]">
-                <Image
-                  src={images[safeImageIndex]}
-                  alt={`${venueName} - صورة رقم ${safeImageIndex + 1}`}
-                  fill
-                  className="object-cover cursor-pointer transition-transform duration-700 group-hover:scale-105"
-                  onClick={() => setIsImageModalOpen(true)}
-                  priority
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
-                />
-                
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                
-                <div className="absolute bottom-0 left-0 right-0 p-3 md:p-6 lg:p-8 text-white">
-                  <div className="flex flex-wrap items-center gap-1.5 md:gap-2 mb-1.5 md:mb-2">
-                    {packageData.featured && (
-                      <span className="bg-gradient-to-r from-yellow-400 to-yellow-500 text-black px-2 md:px-3 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-lg animate-pulse">
-                        ⭐ {t.featured}
-                      </span>
-                    )}
-                    {hasDiscount && (
-                      <span className="bg-gradient-to-r from-green-500 to-green-600 text-white px-2 md:px-3 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-lg flex items-center gap-0.5 md:gap-1">
-                        <Percent size={10} className="md:w-[12px] md:h-[12px]" /> {discountPercent}% {t.discount}
-                      </span>
-                    )}
-                    {packageData.popular && (
-                      <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-2 md:px-3 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-lg">
-                        🔥 {t.popular}
-                      </span>
-                    )}
-                  </div>
-                  
-                  <h1 className="text-lg md:text-3xl lg:text-4xl xl:text-5xl font-bold mb-1 md:mb-2 text-shadow-lg">
-                    {venueName}
-                  </h1>
-                  
-                  <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm opacity-90">
-                    <Link href={`/${locale}/${citySlug}`} className="flex items-center gap-0.5 md:gap-1 hover:underline">
-                      <MapPin size={12} className="md:w-[16px] md:h-[16px]" /> {cityName}
-                    </Link>
-                    {rating > 0 && (
-                      <span className="flex items-center gap-0.5 md:gap-1">
-                        <Star size={12} className="md:w-[16px] md:h-[16px] fill-yellow-400 text-yellow-400" />
-                        <span className="font-medium">{rating}</span>
-                        <span className="text-gray-300">({reviewsCount})</span>
-                      </span>
-                    )}
-                    {bookingCount > 0 && (
-                      <span className="flex items-center gap-0.5 md:gap-1">
-                        <Users size={12} className="md:w-[16px] md:h-[16px]" />
-                        {bookingCount}+ {t.bookingCount}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="absolute top-3 md:top-4 right-3 md:right-4 bg-black/60 text-white text-[10px] md:text-xs px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1 md:gap-2">
-                  <Eye size={10} className="md:w-[12px] md:h-[12px]" />
-                  {safeImageIndex + 1} / {images.length}
-                </div>
-                
-                {images.length > 1 && (
+                {/* ===== عرض الصورة ===== */}
+                {!isCurrentVideo && currentMedia?.type === 'image' && (
                   <>
+                    <Image
+                      src={currentMedia.src}
+                      alt={`${venueName} - صورة رقم ${currentMediaIndex + 1}`}
+                      fill
+                      className="object-cover cursor-pointer transition-transform duration-700 group-hover:scale-105"
+                      onClick={() => setIsImageModalOpen(true)}
+                      priority
+                      sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
+                    />
+                    
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+                    
+                    <div className="absolute bottom-0 left-0 right-0 p-3 md:p-6 lg:p-8 text-white">
+                      <div className="flex flex-wrap items-center gap-1.5 md:gap-2 mb-1.5 md:mb-2">
+                        {packageData.featured && (
+                          <span className="bg-gradient-to-r from-yellow-400 to-yellow-500 text-black px-2 md:px-3 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-lg animate-pulse">
+                            ⭐ {t.featured}
+                          </span>
+                        )}
+                        {hasDiscount && (
+                          <span className="bg-gradient-to-r from-green-500 to-green-600 text-white px-2 md:px-3 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-lg flex items-center gap-0.5 md:gap-1">
+                            <Percent size={10} className="md:w-[12px] md:h-[12px]" /> {discountPercent}% {t.discount}
+                          </span>
+                        )}
+                        {packageData.popular && (
+                          <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-2 md:px-3 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-lg">
+                            🔥 {t.popular}
+                          </span>
+                        )}
+                        {/* ✅ شارة الفيديو */}
+                        {packageData.video_url && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const videoIdx = mediaItems.findIndex(m => m.type === 'video');
+                              if (videoIdx >= 0) goToMedia(videoIdx);
+                            }}
+                            className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 md:px-3 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-lg flex items-center gap-0.5 md:gap-1 hover:scale-105 transition-transform"
+                          >
+                            <Play size={10} className="md:w-[12px] md:h-[12px] fill-white" /> {t.video}
+                          </button>
+                        )}
+                      </div>
+                      
+                      <h1 className="text-lg md:text-3xl lg:text-4xl xl:text-5xl font-bold mb-1 md:mb-2 text-shadow-lg">
+                        {venueName}
+                      </h1>
+                      
+                      <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm opacity-90">
+                        <Link href={`/${locale}/${citySlug}`} className="flex items-center gap-0.5 md:gap-1 hover:underline">
+                          <MapPin size={12} className="md:w-[16px] md:h-[16px]" /> {cityName}
+                        </Link>
+                        {rating > 0 && (
+                          <span className="flex items-center gap-0.5 md:gap-1">
+                            <Star size={12} className="md:w-[16px] md:h-[16px] fill-yellow-400 text-yellow-400" />
+                            <span className="font-medium">{rating}</span>
+                            <span className="text-gray-300">({reviewsCount})</span>
+                          </span>
+                        )}
+                        {bookingCount > 0 && (
+                          <span className="flex items-center gap-0.5 md:gap-1">
+                            <Users size={12} className="md:w-[16px] md:h-[16px]" />
+                            {bookingCount}+ {t.bookingCount}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="absolute top-3 md:top-4 right-3 md:right-4 bg-black/60 text-white text-[10px] md:text-xs px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1 md:gap-2">
+                      <Eye size={10} className="md:w-[12px] md:h-[12px]" />
+                      {currentMediaIndex + 1} / {totalMedia}
+                    </div>
+                    
+                    {totalMedia > 1 && (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); prevMedia(); }}
+                          className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-1.5 md:p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
+                          aria-label="السابق"
+                        >
+                          <ChevronLeft size={16} className="md:w-[24px] md:h-[24px]" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); nextMedia(); }}
+                          className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-1.5 md:p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
+                          aria-label="التالي"
+                        >
+                          <ChevronRight size={16} className="md:w-[24px] md:h-[24px]" />
+                        </button>
+                      </>
+                    )}
+                    
                     <button
-                      onClick={(e) => { e.stopPropagation(); prevImage(); }}
-                      className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-1.5 md:p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
-                      aria-label="الصورة السابقة"
+                      onClick={() => setIsImageModalOpen(true)}
+                      className="absolute bottom-16 md:bottom-20 right-2 md:right-4 bg-black/50 hover:bg-black/70 text-white p-1.5 md:p-2 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
+                      aria-label="تكبير الصورة"
                     >
-                      <ChevronLeft size={16} className="md:w-[24px] md:h-[24px]" />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); nextImage(); }}
-                      className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-1.5 md:p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
-                      aria-label="الصورة التالية"
-                    >
-                      <ChevronRight size={16} className="md:w-[24px] md:h-[24px]" />
+                      <ZoomIn size={14} className="md:w-[18px] md:h-[18px]" />
                     </button>
                   </>
                 )}
-                
-                <button
-                  onClick={() => setIsImageModalOpen(true)}
-                  className="absolute bottom-16 md:bottom-20 right-2 md:right-4 bg-black/50 hover:bg-black/70 text-white p-1.5 md:p-2 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
-                  aria-label="تكبير الصورة"
-                >
-                  <ZoomIn size={14} className="md:w-[18px] md:h-[18px]" />
-                </button>
+
+                {/* ===== عرض الفيديو المباشر (MP4) ===== */}
+                {isCurrentVideo && getVideoType(packageData.video_url) === 'direct' && (
+                  <div className="relative w-full h-full bg-black">
+                    <video
+                      ref={videoRef}
+                      src={packageData.video_url}
+                      className="w-full h-full object-contain"
+                      playsInline
+                      muted={videoMuted}
+                      onLoadedData={() => setVideoLoaded(true)}
+                      onPlay={() => setVideoPlaying(true)}
+                      onPause={() => setVideoPlaying(false)}
+                      onClick={toggleVideoPlay}
+                      poster={images[0]}
+                    />
+                    
+                    <div className="absolute top-3 md:top-4 left-3 md:left-4 bg-purple-500/90 text-white text-[10px] md:text-xs px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1">
+                      <Video size={10} className="md:w-[12px] md:h-[12px]" />
+                      {t.video}
+                    </div>
+                    
+                    <div className="absolute top-3 md:top-4 right-3 md:right-4 bg-black/60 text-white text-[10px] md:text-xs px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1 md:gap-2">
+                      <Eye size={10} className="md:w-[12px] md:h-[12px]" />
+                      {currentMediaIndex + 1} / {totalMedia}
+                    </div>
+                    
+                    {!videoPlaying && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleVideoPlay(); }}
+                        className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/50 transition-colors group/play"
+                        aria-label={t.playVideo}
+                      >
+                        <div className="w-16 h-16 md:w-24 md:h-24 rounded-full bg-white/95 hover:bg-white flex items-center justify-center shadow-2xl transition-transform group-hover/play:scale-110">
+                          <Play size={28} className="md:w-[36px] md:h-[36px] fill-primary text-primary ml-1" />
+                        </div>
+                      </button>
+                    )}
+                    
+                    {videoPlaying && (
+                      <div className="absolute bottom-3 md:bottom-4 left-3 md:left-4 flex items-center gap-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleVideoPlay(); }}
+                          className="bg-black/70 hover:bg-black/90 text-white p-1.5 md:p-2 rounded-full transition-all backdrop-blur-sm"
+                          aria-label={t.pauseVideo}
+                        >
+                          <Pause size={16} className="md:w-[18px] md:h-[18px]" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleVideoMute(); }}
+                          className="bg-black/70 hover:bg-black/90 text-white p-1.5 md:p-2 rounded-full transition-all backdrop-blur-sm"
+                          aria-label={videoMuted ? t.unmuteVideo : t.muteVideo}
+                        >
+                          {videoMuted ? <VolumeX size={16} className="md:w-[18px] md:h-[18px]" /> : <Volume2 size={16} className="md:w-[18px] md:h-[18px]" />}
+                        </button>
+                      </div>
+                    )}
+                    
+                    {totalMedia > 1 && (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); prevMedia(); }}
+                          className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-1.5 md:p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm"
+                          aria-label="السابق"
+                        >
+                          <ChevronLeft size={16} className="md:w-[24px] md:h-[24px]" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); nextMedia(); }}
+                          className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-1.5 md:p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm"
+                          aria-label="التالي"
+                        >
+                          <ChevronRight size={16} className="md:w-[24px] md:h-[24px]" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ===== عرض فيديو يوتيوب ===== */}
+                {isCurrentVideo && getVideoType(packageData.video_url) === 'youtube' && getYouTubeId(packageData.video_url) && (
+                  <div className="relative w-full h-full bg-black">
+                    <iframe
+                      src={`https://www.youtube.com/embed/${getYouTubeId(packageData.video_url)}?autoplay=0&rel=0`}
+                      title={t.videoTitle}
+                      className="w-full h-full"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                    
+                    <div className="absolute top-3 md:top-4 left-3 md:left-4 bg-red-600/90 text-white text-[10px] md:text-xs px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1">
+                      <Video size={10} className="md:w-[12px] md:h-[12px]" />
+                      YouTube
+                    </div>
+                    
+                    <div className="absolute top-3 md:top-4 right-3 md:right-4 bg-black/60 text-white text-[10px] md:text-xs px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1 md:gap-2">
+                      <Eye size={10} className="md:w-[12px] md:h-[12px]" />
+                      {currentMediaIndex + 1} / {totalMedia}
+                    </div>
+                  </div>
+                )}
+
+                {/* ===== عرض فيديو فيميو ===== */}
+                {isCurrentVideo && getVideoType(packageData.video_url) === 'vimeo' && getVimeoId(packageData.video_url) && (
+                  <div className="relative w-full h-full bg-black">
+                    <iframe
+                      src={`https://player.vimeo.com/video/${getVimeoId(packageData.video_url)}?autoplay=0`}
+                      title={t.videoTitle}
+                      className="w-full h-full"
+                      allow="autoplay; fullscreen; picture-in-picture"
+                      allowFullScreen
+                    />
+                    
+                    <div className="absolute top-3 md:top-4 left-3 md:left-4 bg-blue-600/90 text-white text-[10px] md:text-xs px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1">
+                      <Video size={10} className="md:w-[12px] md:h-[12px]" />
+                      Vimeo
+                    </div>
+                    
+                    <div className="absolute top-3 md:top-4 right-3 md:right-4 bg-black/60 text-white text-[10px] md:text-xs px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1 md:gap-2">
+                      <Eye size={10} className="md:w-[12px] md:h-[12px]" />
+                      {currentMediaIndex + 1} / {totalMedia}
+                    </div>
+                  </div>
+                )}
               </div>
               
-              {images.length > 1 && (
+              {/* ===== شريط المصغرات (صور + فيديو) ===== */}
+              {totalMedia > 1 && (
                 <div className="flex gap-1.5 md:gap-2 p-2 md:p-3 bg-white/95 backdrop-blur-sm overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
-                  {images.map((img, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => goToImage(idx)}
-                      className={`flex-shrink-0 w-12 h-9 md:w-16 md:h-12 lg:w-20 lg:h-14 rounded-lg overflow-hidden transition-all duration-300 ${
-                        idx === safeImageIndex 
-                          ? 'ring-2 ring-primary shadow-lg scale-105' 
-                          : 'opacity-60 hover:opacity-100 hover:scale-105'
-                      }`}
-                      aria-label={`الانتقال إلى الصورة ${idx + 1}`}
-                    >
-                      <Image
-                        src={img}
-                        alt={`صورة مصغرة ${idx + 1}`}
-                        width={80}
-                        height={56}
-                        className="w-full h-full object-cover"
-                      />
-                    </button>
-                  ))}
+                  {mediaItems.map((item, idx) => {
+                    const isActive = idx === currentMediaIndex;
+                    
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => goToMedia(idx)}
+                        className={`flex-shrink-0 relative w-12 h-9 md:w-16 md:h-12 lg:w-20 lg:h-14 rounded-lg overflow-hidden transition-all duration-300 ${
+                          isActive 
+                            ? 'ring-2 ring-primary shadow-lg scale-105' 
+                            : 'opacity-60 hover:opacity-100 hover:scale-105'
+                        }`}
+                        aria-label={item.type === 'video' ? 'الفيديو' : `الصورة ${idx + 1}`}
+                      >
+                        {item.type === 'image' ? (
+                          <Image
+                            src={item.src}
+                            alt={`مصغرة ${idx + 1}`}
+                            width={80}
+                            height={56}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full relative bg-black">
+                            {images[0] ? (
+                              <img
+                                src={images[0]}
+                                alt="فيديو"
+                                className="w-full h-full object-cover opacity-70"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-br from-purple-600 to-pink-600" />
+                            )}
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                              <div className="w-5 h-5 md:w-7 md:h-7 rounded-full bg-white/95 flex items-center justify-center shadow-lg">
+                                <Play size={10} className="md:w-[14px] md:h-[14px] fill-purple-600 text-purple-600 ml-0.5" />
+                              </div>
+                            </div>
+                            <div className="absolute top-0.5 right-0.5 bg-purple-500 text-white text-[7px] md:text-[9px] px-1 py-0.5 rounded font-bold">
+                              {t.videoBadge}
+                            </div>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -1637,7 +1866,6 @@ export default function PackageClient() {
               </section>
             )}
 
-            {/* ===== قسم اختيار الباقات ===== */}
             {packageData.package_tiers?.length > 0 && (
               <section className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow duration-300">
                 <h2 className="text-lg md:text-xl font-bold text-primary mb-3 md:mb-4 flex items-center gap-2">
@@ -1739,7 +1967,6 @@ export default function PackageClient() {
               </section>
             )}
 
-            {/* ===== ✅ قسم الأسئلة الشائعة (FAQ) ===== */}
             {hasFaq && (
               <section className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow duration-300">
                 <div className="flex items-center gap-3 mb-4">
@@ -2128,12 +2355,10 @@ export default function PackageClient() {
         </div>
       </div>
 
-      {/* ============================================
-          ✅ عرض الباقات المشابهة (Similar Packages)
-      ============================================ */}
       {renderSimilarPackages()}
 
-      {isImageModalOpen && hasImages && (
+      {/* ===== نافذة عرض الصور المنبثقة ===== */}
+      {isImageModalOpen && !isCurrentVideo && currentMedia?.type === 'image' && (
         <div 
           className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-2 md:p-4 backdrop-blur-sm"
           onClick={() => setIsImageModalOpen(false)}
@@ -2162,8 +2387,8 @@ export default function PackageClient() {
               onClick={(e) => { 
                 e.stopPropagation();
                 const link = document.createElement('a');
-                link.href = images[safeImageIndex];
-                link.download = `${venueName}-image-${safeImageIndex + 1}.jpg`;
+                link.href = currentMedia.src;
+                link.download = `${venueName}-image-${currentMediaIndex + 1}.jpg`;
                 link.click();
               }}
               className="bg-white/10 hover:bg-white/20 text-white p-1.5 md:p-2 rounded-full transition-all backdrop-blur-sm"
@@ -2172,7 +2397,7 @@ export default function PackageClient() {
               <Download size={16} className="md:w-[20px] md:h-[20px]" />
             </button>
             <span className="text-white/70 text-[10px] md:text-sm bg-black/50 px-2 md:px-3 py-1 md:py-1.5 rounded-full backdrop-blur-sm">
-              {safeImageIndex + 1} / {images.length}
+              {currentMediaIndex + 1} / {totalMedia}
             </span>
           </div>
           
@@ -2191,8 +2416,8 @@ export default function PackageClient() {
                 </div>
               )}
               <Image
-                src={images[safeImageIndex]}
-                alt={`${venueName} - صورة ${safeImageIndex + 1}`}
+                src={currentMedia.src}
+                alt={`${venueName} - صورة`}
                 fill
                 className={`object-contain transition-opacity duration-300 ${imageLoading ? 'opacity-0' : 'opacity-100'}`}
                 onLoad={() => setImageLoading(false)}
@@ -2201,19 +2426,19 @@ export default function PackageClient() {
               />
             </div>
             
-            {images.length > 1 && (
+            {totalMedia > 1 && (
               <>
                 <button
-                  onClick={(e) => { e.stopPropagation(); prevImage(); }}
+                  onClick={(e) => { e.stopPropagation(); prevMedia(); }}
                   className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-2 md:p-4 rounded-full transition-all hover:scale-110 backdrop-blur-sm"
-                  aria-label="الصورة السابقة"
+                  aria-label="السابق"
                 >
                   <ChevronLeft size={20} className="md:w-[28px] md:h-[28px]" />
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); nextImage(); }}
+                  onClick={(e) => { e.stopPropagation(); nextMedia(); }}
                   className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-2 md:p-4 rounded-full transition-all hover:scale-110 backdrop-blur-sm"
-                  aria-label="الصورة التالية"
+                  aria-label="التالي"
                 >
                   <ChevronRight size={20} className="md:w-[28px] md:h-[28px]" />
                 </button>
@@ -2223,7 +2448,7 @@ export default function PackageClient() {
             <div className="absolute bottom-2 md:bottom-4 left-1/2 -translate-x-1/2 bg-black/60 text-white text-[10px] md:text-sm px-3 md:px-4 py-1.5 md:py-2 rounded-full backdrop-blur-sm flex items-center gap-2 md:gap-4">
               <span>{venueName}</span>
               <span className="w-px h-3 md:h-4 bg-white/30"></span>
-              <span>{safeImageIndex + 1} / {images.length}</span>
+              <span>{currentMediaIndex + 1} / {totalMedia}</span>
             </div>
           </div>
         </div>

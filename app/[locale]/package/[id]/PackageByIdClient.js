@@ -8,7 +8,8 @@ import {
   ChevronRight, CheckCircle, ArrowLeft, Star, Clock, Award, 
   Info, Shield, Gift, Sparkles, Crown, Tag, Percent, FileText,
   Heart, Share2, Building, X, ZoomIn, ZoomOut, Download,
-  ExternalLink, MessageCircle, ThumbsUp, Eye
+  ExternalLink, MessageCircle, ThumbsUp, Eye, Play, Video,
+  Pause, Volume2, VolumeX
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { formatWorkingHours } from '@/lib/utils';
@@ -35,14 +36,20 @@ export default function PackageByIdClient() {
   const [isFavorite, setIsFavorite] = useState(false);
   const [bookingError, setBookingError] = useState('');
   
-  // ===== معرض الصور المحسن =====
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  // ===== معرض الوسائط (صور + فيديو) =====
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
   const [touchStart, setTouchStart] = useState(0);
   const [touchEnd, setTouchEnd] = useState(0);
   const [imageLoading, setImageLoading] = useState(true);
   const modalRef = useRef(null);
+
+  // ===== حالة الفيديو =====
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoMuted, setVideoMuted] = useState(true);
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  const videoRef = useRef(null);
   
   // ===== نموذج الحجز =====
   const [formData, setFormData] = useState({
@@ -85,11 +92,37 @@ export default function PackageByIdClient() {
   useEffect(() => {
     if (id) {
       fetchPackage();
-      // تمرير الصفحة للأعلى عند الانتقال بين الباقات (من الباقات المشابهة مثلاً)
       window.scrollTo({ top: 0, behavior: 'auto' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, branchId]);
+
+  // ============================================
+  // إيقاف الفيديو عند تغيير الوسائط
+  // ============================================
+  useEffect(() => {
+    return () => {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      }
+    };
+  }, [currentMediaIndex]);
+
+  // ============================================
+  // إغلاق النوافذ بزر Escape
+  // ============================================
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        if (isImageModalOpen) setIsImageModalOpen(false);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', handleEsc);
+      return () => window.removeEventListener('keydown', handleEsc);
+    }
+  }, [isImageModalOpen]);
 
   // ============================================
   // جلب بيانات الباقة
@@ -97,19 +130,18 @@ export default function PackageByIdClient() {
   async function fetchPackage() {
     setLoading(true);
 
-    // تصفير حالة الباقة السابقة قبل جلب باقة جديدة، لمنع تداخل
-    // بيانات الباقة القديمة (الفرع المختار، الباقة المختارة، مؤشر
-    // الصورة...) عند الانتقال من صفحة باقة إلى أخرى.
     setPackageData(null);
     setBranches([]);
     setSelectedBranch(null);
     setSelectedTier(null);
     setSimilarPackages([]);
     setReviews([]);
-    setCurrentImageIndex(0);
+    setCurrentMediaIndex(0);
     setImageLoading(true);
     setIsImageModalOpen(false);
     setIsZoomed(false);
+    setVideoPlaying(false);
+    setVideoLoaded(false);
     setSubmitted(false);
     setBookingError('');
 
@@ -123,13 +155,33 @@ export default function PackageByIdClient() {
       .eq('id', id)
       .single();
 
+    // ✅ ضمان جلب video_url حتى لو لم يُرجع * العمود
+    let videoUrl = data?.video_url || null;
+    
+    if (!error && data && (videoUrl === null || videoUrl === undefined)) {
+      const { data: videoData } = await supabase
+        .from('packages')
+        .select('video_url')
+        .eq('id', id)
+        .single();
+      
+      if (videoData?.video_url) {
+        videoUrl = videoData.video_url;
+      }
+    }
+
     if (!error && data) {
-      setPackageData(data);
+      const enrichedData = { ...data, video_url: videoUrl };
+      
+      console.log('📦 Package Data loaded:', enrichedData);
+      console.log('🎥 video_url:', enrichedData.video_url);
+      
+      setPackageData(enrichedData);
+      
       if (data.package_tiers?.length > 0) {
         setSelectedTier(data.package_tiers[0]);
       }
       
-      // جلب الفروع
       const { data: branchesData } = await supabase
         .from('branches')
         .select('*')
@@ -145,7 +197,6 @@ export default function PackageByIdClient() {
         setSelectedBranch(branchesData[0]);
       }
       
-      // جلب التقييمات
       const { data: reviewsData } = await supabase
         .from('reviews')
         .select('*')
@@ -155,7 +206,6 @@ export default function PackageByIdClient() {
       
       setReviews(reviewsData || []);
       
-      // جلب باقات مشابهة
       if (data.city_id) {
         const { data: similar } = await supabase
           .from('packages')
@@ -274,24 +324,41 @@ export default function PackageByIdClient() {
   }
 
   // ============================================
-  // دوال معرض الصور المحسن
+  // دوال معرض الوسائط (صور + فيديو)
   // ============================================
-  const nextImage = () => {
-    if (packageData?.images?.length > 0) {
-      setCurrentImageIndex((prev) => (prev + 1) % packageData.images.length);
+  const nextMedia = () => {
+    if (totalMedia > 0) {
+      // إيقاف الفيديو الحالي عند الانتقال
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      }
+      setVideoPlaying(false);
+      setCurrentMediaIndex((prev) => (prev + 1) % totalMedia);
       setImageLoading(true);
     }
   };
 
-  const prevImage = () => {
-    if (packageData?.images?.length > 0) {
-      setCurrentImageIndex((prev) => (prev - 1 + packageData.images.length) % packageData.images.length);
+  const prevMedia = () => {
+    if (totalMedia > 0) {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      }
+      setVideoPlaying(false);
+      setCurrentMediaIndex((prev) => (prev - 1 + totalMedia) % totalMedia);
       setImageLoading(true);
     }
   };
 
-  const goToImage = (index) => {
-    setCurrentImageIndex(index);
+  const goToMedia = (index) => {
+    if (index === currentMediaIndex) return;
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+    setVideoPlaying(false);
+    setCurrentMediaIndex(index);
     setImageLoading(true);
   };
 
@@ -309,17 +376,37 @@ export default function PackageByIdClient() {
 
   const handleTouchEnd = () => {
     if (touchStart - touchEnd > 50) {
-      nextImage();
+      nextMedia();
     }
     if (touchStart - touchEnd < -50) {
-      prevImage();
+      prevMedia();
     }
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') setIsImageModalOpen(false);
-    if (e.key === 'ArrowRight') nextImage();
-    if (e.key === 'ArrowLeft') prevImage();
+    if (e.key === 'ArrowRight') nextMedia();
+    if (e.key === 'ArrowLeft') prevMedia();
+  };
+
+  // ============================================
+  // دوال التحكم بالفيديو
+  // ============================================
+  const toggleVideoPlay = () => {
+    if (!videoRef.current) return;
+    if (videoPlaying) {
+      videoRef.current.pause();
+      setVideoPlaying(false);
+    } else {
+      videoRef.current.play();
+      setVideoPlaying(true);
+    }
+  };
+
+  const toggleVideoMute = () => {
+    if (!videoRef.current) return;
+    videoRef.current.muted = !videoMuted;
+    setVideoMuted(!videoMuted);
   };
 
   // ============================================
@@ -354,12 +441,33 @@ export default function PackageByIdClient() {
     return null;
   };
 
+  // ✅ نوع الفيديو
+  const getVideoType = (url) => {
+    if (!url) return 'unknown';
+    if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
+    if (url.includes('vimeo.com')) return 'vimeo';
+    return 'direct';
+  };
+
+  const getYouTubeId = (url) => {
+    if (!url) return null;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
+
+  const getVimeoId = (url) => {
+    if (!url) return null;
+    const match = url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+    return match ? match[1] : null;
+  };
+
   const mapUrl = getMapUrl();
   const embedUrl = convertToEmbedUrl(mapUrl);
   const currencySymbol = getCurrencySymbol(packageData?.currency || 'SAR', locale);
 
   // ============================================
-  // النصوص (واضحة ومبسطة)
+  // النصوص
   // ============================================
   const texts = {
     ar: {
@@ -402,7 +510,6 @@ export default function PackageByIdClient() {
       verified: 'تم التحقق',
       bookingCount: 'حجز سابق',
       
-      // الفروع
       branch: 'الفرع',
       selectBranch: 'اختر الفرع',
       multipleBranches: 'فروع متعددة',
@@ -420,12 +527,21 @@ export default function PackageByIdClient() {
       share: 'مشاركة',
       favorite: 'إضافة للمفضلة',
       
-      images: 'معرض الصور',
+      images: 'معرض الوسائط',
       noImages: 'لا توجد صور متاحة',
       closeGallery: 'إغلاق المعرض',
       downloadImage: 'تحميل الصورة',
       zoomIn: 'تكبير',
       zoomOut: 'تصغير',
+      
+      video: 'فيديو',
+      videoBadge: 'فيديو',
+      playVideo: 'تشغيل الفيديو',
+      pauseVideo: 'إيقاف الفيديو',
+      muteVideo: 'كتم الصوت',
+      unmuteVideo: 'تشغيل الصوت',
+      videoNotSupported: 'متصفحك لا يدعم تشغيل الفيديو',
+      videoTitle: 'فيديو تعريفي',
       
       error: 'حدث خطأ',
       requiredField: 'هذا الحقل مطلوب'
@@ -487,12 +603,21 @@ export default function PackageByIdClient() {
       share: 'Share',
       favorite: 'Add to Favorites',
       
-      images: 'Image Gallery',
+      images: 'Media Gallery',
       noImages: 'No images available',
       closeGallery: 'Close Gallery',
       downloadImage: 'Download Image',
       zoomIn: 'Zoom In',
       zoomOut: 'Zoom Out',
+      
+      video: 'Video',
+      videoBadge: 'Video',
+      playVideo: 'Play Video',
+      pauseVideo: 'Pause Video',
+      muteVideo: 'Mute',
+      unmuteVideo: 'Unmute',
+      videoNotSupported: 'Your browser does not support video playback',
+      videoTitle: 'Introductory Video',
       
       error: 'Error',
       requiredField: 'This field is required'
@@ -548,9 +673,22 @@ export default function PackageByIdClient() {
   const description = locale === 'ar' ? packageData.description_ar : packageData.description_en;
   const terms = locale === 'ar' ? packageData.terms_ar : packageData.terms_en;
   const cityName = locale === 'ar' ? packageData.cities?.name_ar : packageData.cities?.name_en;
-  const hasImages = packageData.images && packageData.images.length > 0;
   const images = packageData.images || [];
-  const safeImageIndex = hasImages ? Math.min(currentImageIndex, images.length - 1) : 0;
+  const videoUrl = packageData.video_url;
+  const hasVideo = !!videoUrl;
+  const videoType = getVideoType(videoUrl);
+  
+  // ✅ بناء قائمة الوسائط: الصور + الفيديو في النهاية
+  const mediaItems = [
+    ...images.map((img, idx) => ({ type: 'image', src: img, index: idx })),
+    ...(hasVideo ? [{ type: 'video', src: videoUrl }] : [])
+  ];
+  const totalMedia = mediaItems.length;
+  const hasMedia = totalMedia > 0;
+  const safeMediaIndex = hasMedia ? Math.min(currentMediaIndex, totalMedia - 1) : 0;
+  const currentMedia = mediaItems[safeMediaIndex];
+  const isCurrentVideo = currentMedia?.type === 'video';
+
   const minPrice = packageData.package_tiers?.length > 0 
     ? Math.min(...packageData.package_tiers.map(t => t.price))
     : 0;
@@ -613,123 +751,299 @@ export default function PackageByIdClient() {
       </nav>
 
       {/* ============================================
-          معرض الصور الرئيسي
+          معرض الوسائط الرئيسي (صور + فيديو)
       ============================================ */}
       <header className="container mx-auto px-4 py-4 md:py-8">
         <div className="relative rounded-2xl md:rounded-3xl overflow-hidden bg-gradient-to-br from-gray-900 to-gray-700 shadow-2xl group">
-          {hasImages ? (
+          {hasMedia ? (
             <>
               <div className="relative aspect-[16/9] md:aspect-[21/9] lg:aspect-[21/8]">
-                <Image
-                  src={images[safeImageIndex]}
-                  alt={`${venueName} - صورة رقم ${safeImageIndex + 1}`}
-                  fill
-                  className="object-cover cursor-pointer transition-transform duration-700 group-hover:scale-105"
-                  onClick={() => setIsImageModalOpen(true)}
-                  priority
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
-                />
-                
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                
-                <div className="absolute bottom-0 left-0 right-0 p-4 md:p-8 text-white">
-                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                    {packageData.featured && (
-                      <span className="bg-gradient-to-r from-yellow-400 to-yellow-500 text-black px-3 py-1 rounded-full text-xs font-bold shadow-lg animate-pulse">
-                        ⭐ {t.featured}
-                      </span>
-                    )}
-                    {hasDiscount && (
-                      <span className="bg-gradient-to-r from-green-500 to-green-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1">
-                        <Percent size={12} /> {discountPercent}% {t.discount}
-                      </span>
-                    )}
-                    {packageData.popular && (
-                      <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
-                        🔥 {t.popular}
-                      </span>
-                    )}
-                  </div>
-                  
-                  <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold mb-2 text-shadow-lg">
-                    {venueName}
-                  </h1>
-                  
-                  <div className="flex flex-wrap items-center gap-4 text-sm md:text-base opacity-90">
-                    <span className="flex items-center gap-1">
-                      <MapPin size={16} /> {cityName}
-                    </span>
-                    {rating > 0 && (
-                      <span className="flex items-center gap-1">
-                        <Star size={16} className="fill-yellow-400 text-yellow-400" />
-                        <span className="font-medium">{rating}</span>
-                        <span className="text-gray-300">({reviewsCount})</span>
-                      </span>
-                    )}
-                    {bookingCount > 0 && (
-                      <span className="flex items-center gap-1">
-                        <Users size={16} />
-                        {bookingCount}+ {t.bookingCount}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-2">
-                  <Eye size={12} />
-                  {safeImageIndex + 1} / {images.length}
-                </div>
-                
-                {images.length > 1 && (
+                {/* ===== عرض الصورة ===== */}
+                {!isCurrentVideo && currentMedia?.type === 'image' && (
                   <>
+                    <Image
+                      src={currentMedia.src}
+                      alt={`${venueName} - صورة رقم ${safeMediaIndex + 1}`}
+                      fill
+                      className="object-cover cursor-pointer transition-transform duration-700 group-hover:scale-105"
+                      onClick={() => setIsImageModalOpen(true)}
+                      priority
+                      sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
+                    />
+                    
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+                    
+                    {/* معلومات الباقة فوق الصورة */}
+                    <div className="absolute bottom-0 left-0 right-0 p-4 md:p-8 text-white pointer-events-none">
+                      <div className="flex flex-wrap items-center gap-2 mb-2 pointer-events-auto">
+                        {packageData.featured && (
+                          <span className="bg-gradient-to-r from-yellow-400 to-yellow-500 text-black px-3 py-1 rounded-full text-xs font-bold shadow-lg animate-pulse">
+                            ⭐ {t.featured}
+                          </span>
+                        )}
+                        {hasDiscount && (
+                          <span className="bg-gradient-to-r from-green-500 to-green-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1">
+                            <Percent size={12} /> {discountPercent}% {t.discount}
+                          </span>
+                        )}
+                        {packageData.popular && (
+                          <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
+                            🔥 {t.popular}
+                          </span>
+                        )}
+                        {hasVideo && (
+                          <span className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-1">
+                            <Play size={12} className="fill-white" /> {t.video}
+                          </span>
+                        )}
+                      </div>
+                      
+                      <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold mb-2 text-shadow-lg">
+                        {venueName}
+                      </h1>
+                      
+                      <div className="flex flex-wrap items-center gap-4 text-sm md:text-base opacity-90">
+                        <span className="flex items-center gap-1">
+                          <MapPin size={16} /> {cityName}
+                        </span>
+                        {rating > 0 && (
+                          <span className="flex items-center gap-1">
+                            <Star size={16} className="fill-yellow-400 text-yellow-400" />
+                            <span className="font-medium">{rating}</span>
+                            <span className="text-gray-300">({reviewsCount})</span>
+                          </span>
+                        )}
+                        {bookingCount > 0 && (
+                          <span className="flex items-center gap-1">
+                            <Users size={16} />
+                            {bookingCount}+ {t.bookingCount}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* عداد الوسائط */}
+                    <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-2">
+                      <Eye size={12} />
+                      {safeMediaIndex + 1} / {totalMedia}
+                    </div>
+                    
+                    {/* أزرار التنقل */}
+                    {totalMedia > 1 && (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); prevMedia(); }}
+                          className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
+                          aria-label="السابق"
+                        >
+                          <ChevronLeft size={24} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); nextMedia(); }}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
+                          aria-label="التالي"
+                        >
+                          <ChevronRight size={24} />
+                        </button>
+                      </>
+                    )}
+                    
+                    {/* زر التكبير */}
                     <button
-                      onClick={(e) => { e.stopPropagation(); prevImage(); }}
-                      className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
-                      aria-label="الصورة السابقة"
+                      onClick={() => setIsImageModalOpen(true)}
+                      className="absolute bottom-20 right-4 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
+                      aria-label="تكبير الصورة"
                     >
-                      <ChevronLeft size={24} />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); nextImage(); }}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
-                      aria-label="الصورة التالية"
-                    >
-                      <ChevronRight size={24} />
+                      <ZoomIn size={18} />
                     </button>
                   </>
                 )}
-                
-                <button
-                  onClick={() => setIsImageModalOpen(true)}
-                  className="absolute bottom-20 right-4 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition-all hover:scale-110 backdrop-blur-sm opacity-0 group-hover:opacity-100"
-                  aria-label="تكبير الصورة"
-                >
-                  <ZoomIn size={18} />
-                </button>
+
+                {/* ===== عرض الفيديو المباشر (mp4) ===== */}
+                {isCurrentVideo && videoType === 'direct' && (
+                  <div className="relative w-full h-full bg-black">
+                    <video
+                      ref={videoRef}
+                      src={currentMedia.src}
+                      className="w-full h-full object-contain"
+                      playsInline
+                      muted={videoMuted}
+                      onLoadedData={() => setVideoLoaded(true)}
+                      onPlay={() => setVideoPlaying(true)}
+                      onPause={() => setVideoPlaying(false)}
+                      onClick={toggleVideoPlay}
+                      poster={images[0]}
+                    />
+                    
+                    {/* overlay معلومات فوق الفيديو */}
+                    <div className="absolute top-4 left-4 bg-purple-500/90 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1">
+                      <Video size={12} />
+                      {t.video}
+                    </div>
+                    
+                    <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-2">
+                      <Eye size={12} />
+                      {safeMediaIndex + 1} / {totalMedia}
+                    </div>
+                    
+                    {/* زر تشغيل كبير عندما يكون الفيديو متوقفاً */}
+                    {!videoPlaying && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleVideoPlay(); }}
+                        className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/50 transition-colors group/play"
+                        aria-label={t.playVideo}
+                      >
+                        <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-white/95 hover:bg-white flex items-center justify-center shadow-2xl transition-transform group-hover/play:scale-110">
+                          <Play size={36} className="fill-primary text-primary ml-1" />
+                        </div>
+                      </button>
+                    )}
+                    
+                    {/* أزرار التحكم */}
+                    {videoPlaying && (
+                      <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleVideoPlay(); }}
+                            className="bg-black/70 hover:bg-black/90 text-white p-2 rounded-full transition-all backdrop-blur-sm"
+                            aria-label={videoPlaying ? t.pauseVideo : t.playVideo}
+                          >
+                            {videoPlaying ? <Pause size={18} /> : <Play size={18} className="fill-white" />}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleVideoMute(); }}
+                            className="bg-black/70 hover:bg-black/90 text-white p-2 rounded-full transition-all backdrop-blur-sm"
+                            aria-label={videoMuted ? t.unmuteVideo : t.muteVideo}
+                          >
+                            {videoMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* أزرار التنقل */}
+                    {totalMedia > 1 && (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); prevMedia(); }}
+                          className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm"
+                          aria-label="السابق"
+                        >
+                          <ChevronLeft size={24} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); nextMedia(); }}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 rounded-full transition-all hover:scale-110 backdrop-blur-sm"
+                          aria-label="التالي"
+                        >
+                          <ChevronRight size={24} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ===== عرض فيديو يوتيوب ===== */}
+                {isCurrentVideo && videoType === 'youtube' && getYouTubeId(videoUrl) && (
+                  <div className="relative w-full h-full bg-black">
+                    <iframe
+                      src={`https://www.youtube.com/embed/${getYouTubeId(videoUrl)}?autoplay=0&rel=0`}
+                      title={t.videoTitle}
+                      className="w-full h-full"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                    
+                    <div className="absolute top-4 left-4 bg-red-600/90 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1">
+                      <Video size={12} />
+                      YouTube
+                    </div>
+                    
+                    <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-2">
+                      <Eye size={12} />
+                      {safeMediaIndex + 1} / {totalMedia}
+                    </div>
+                  </div>
+                )}
+
+                {/* ===== عرض فيديو فيميو ===== */}
+                {isCurrentVideo && videoType === 'vimeo' && getVimeoId(videoUrl) && (
+                  <div className="relative w-full h-full bg-black">
+                    <iframe
+                      src={`https://player.vimeo.com/video/${getVimeoId(videoUrl)}?autoplay=0`}
+                      title={t.videoTitle}
+                      className="w-full h-full"
+                      allow="autoplay; fullscreen; picture-in-picture"
+                      allowFullScreen
+                    />
+                    
+                    <div className="absolute top-4 left-4 bg-blue-600/90 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1">
+                      <Video size={12} />
+                      Vimeo
+                    </div>
+                    
+                    <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-2">
+                      <Eye size={12} />
+                      {safeMediaIndex + 1} / {totalMedia}
+                    </div>
+                  </div>
+                )}
               </div>
               
-              {images.length > 1 && (
+              {/* ============================================
+                  شريط المصغرات (صور + فيديو)
+              ============================================ */}
+              {totalMedia > 1 && (
                 <div className="flex gap-2 p-3 bg-white/95 backdrop-blur-sm overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
-                  {images.map((img, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => goToImage(idx)}
-                      className={`flex-shrink-0 w-16 h-12 md:w-20 md:h-14 rounded-lg overflow-hidden transition-all duration-300 ${
-                        idx === safeImageIndex 
-                          ? 'ring-2 ring-primary shadow-lg scale-105' 
-                          : 'opacity-60 hover:opacity-100 hover:scale-105'
-                      }`}
-                      aria-label={`الانتقال إلى الصورة ${idx + 1}`}
-                    >
-                      <Image
-                        src={img}
-                        alt={`صورة مصغرة ${idx + 1}`}
-                        width={80}
-                        height={56}
-                        className="w-full h-full object-cover"
-                      />
-                    </button>
-                  ))}
+                  {mediaItems.map((item, idx) => {
+                    const isActive = idx === safeMediaIndex;
+                    
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => goToMedia(idx)}
+                        className={`flex-shrink-0 relative w-16 h-12 md:w-20 md:h-14 rounded-lg overflow-hidden transition-all duration-300 ${
+                          isActive 
+                            ? 'ring-2 ring-primary shadow-lg scale-105' 
+                            : 'opacity-60 hover:opacity-100 hover:scale-105'
+                        }`}
+                        aria-label={`الانتقال إلى ${item.type === 'video' ? 'الفيديو' : `الصورة ${idx + 1}`}`}
+                      >
+                        {item.type === 'image' ? (
+                          <Image
+                            src={item.src}
+                            alt={`مصغرة ${idx + 1}`}
+                            width={80}
+                            height={56}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full relative bg-black">
+                            {/* صورة البوستر للفيديو */}
+                            {images[0] ? (
+                              <img
+                                src={images[0]}
+                                alt="فيديو"
+                                className="w-full h-full object-cover opacity-70"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-br from-purple-600 to-pink-600" />
+                            )}
+                            {/* أيقونة الفيديو */}
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                              <div className="w-6 h-6 md:w-7 md:h-7 rounded-full bg-white/95 flex items-center justify-center shadow-lg">
+                                <Play size={12} className="fill-purple-600 text-purple-600 ml-0.5" />
+                              </div>
+                            </div>
+                            {/* شارة فيديو */}
+                            <div className="absolute top-0.5 right-0.5 bg-purple-500 text-white text-[8px] px-1 py-0.5 rounded font-bold">
+                              {t.videoBadge}
+                            </div>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -839,10 +1153,7 @@ export default function PackageByIdClient() {
               </div>
             </section>
 
-            {/* ============================================
-                قسم: اختيار الفرع (بطاقات قابلة للتمرير)
-                يظهر فقط إذا كان للباقة أكثر من فرع واحد
-            ============================================ */}
+            {/* قسم: اختيار الفرع */}
             {branches.length > 1 && (
               <section className="bg-white rounded-2xl shadow-lg p-6 hover:shadow-xl transition-shadow duration-300">
                 <div className="flex items-center justify-between mb-4">
@@ -856,7 +1167,6 @@ export default function PackageByIdClient() {
                 </div>
                 
                 <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-300 snap-x snap-mandatory">
-                  {/* بطاقة "جميع الفروع" */}
                   <button
                     onClick={() => setSelectedBranch(null)}
                     className={`flex-shrink-0 snap-start min-w-[200px] max-w-[240px] rounded-xl border-2 p-3.5 transition-all duration-300 text-start group ${
@@ -892,7 +1202,6 @@ export default function PackageByIdClient() {
                     )}
                   </button>
 
-                  {/* بطاقات الفروع */}
                   {branches.map((branch) => {
                     const isSelected = selectedBranch?.id === branch.id;
                     const branchName = locale === 'ar' ? branch.name_ar : branch.name_en;
@@ -969,7 +1278,6 @@ export default function PackageByIdClient() {
                   })}
                 </div>
 
-                {/* معلومات الفرع المحدد بالتفصيل */}
                 {selectedBranch && (
                   <div className="mt-4 p-4 bg-gradient-to-br from-primary/5 to-accent/5 rounded-xl border border-primary/10">
                     <div className="flex items-start gap-3">
@@ -1248,7 +1556,6 @@ export default function PackageByIdClient() {
                 <h2 className="text-2xl font-bold text-primary">{t.bookingForm}</h2>
               </div>
 
-              {/* ملخص الباقة المختارة */}
               {selectedTier && (
                 <div className="mb-5 p-4 bg-gradient-to-br from-accent/10 to-primary/5 rounded-xl border border-accent/20">
                   <p className="text-xs text-gray-500 mb-1">{locale === 'ar' ? 'الباقة المختارة' : 'Selected Package'}</p>
@@ -1449,6 +1756,12 @@ export default function PackageByIdClient() {
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                     
+                    {pkg.video_url && (
+                      <div className="absolute top-2 left-2 bg-purple-500/90 text-white px-2 py-1 rounded-full text-xs font-bold shadow-lg backdrop-blur-sm flex items-center gap-1">
+                        <Play size={10} className="fill-white" /> {t.video}
+                      </div>
+                    )}
+                    
                     {pkgMinPrice > 0 && (
                       <div className="absolute bottom-2 right-2 bg-accent/90 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-lg backdrop-blur-sm">
                         {pkgMinPrice} {pkgCurrency}
@@ -1484,7 +1797,7 @@ export default function PackageByIdClient() {
       {/* ============================================
           نافذة عرض الصور المنبثقة
       ============================================ */}
-      {isImageModalOpen && hasImages && (
+      {isImageModalOpen && currentMedia?.type === 'image' && (
         <div 
           className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
           onClick={() => setIsImageModalOpen(false)}
@@ -1513,8 +1826,8 @@ export default function PackageByIdClient() {
               onClick={(e) => { 
                 e.stopPropagation();
                 const link = document.createElement('a');
-                link.href = images[safeImageIndex];
-                link.download = `${venueName}-image-${safeImageIndex + 1}.jpg`;
+                link.href = currentMedia.src;
+                link.download = `${venueName}-image.jpg`;
                 link.click();
               }}
               className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full transition-all backdrop-blur-sm"
@@ -1523,7 +1836,7 @@ export default function PackageByIdClient() {
               <Download size={20} />
             </button>
             <span className="text-white/70 text-sm bg-black/50 px-3 py-1.5 rounded-full backdrop-blur-sm">
-              {safeImageIndex + 1} / {images.length}
+              {safeMediaIndex + 1} / {totalMedia}
             </span>
           </div>
           
@@ -1542,8 +1855,8 @@ export default function PackageByIdClient() {
                 </div>
               )}
               <Image
-                src={images[safeImageIndex]}
-                alt={`${venueName} - صورة ${safeImageIndex + 1}`}
+                src={currentMedia.src}
+                alt={`${venueName} - صورة`}
                 fill
                 className={`object-contain transition-opacity duration-300 ${imageLoading ? 'opacity-0' : 'opacity-100'}`}
                 onLoad={() => setImageLoading(false)}
@@ -1552,19 +1865,19 @@ export default function PackageByIdClient() {
               />
             </div>
             
-            {images.length > 1 && (
+            {totalMedia > 1 && (
               <>
                 <button
-                  onClick={(e) => { e.stopPropagation(); prevImage(); }}
+                  onClick={(e) => { e.stopPropagation(); prevMedia(); }}
                   className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-4 rounded-full transition-all hover:scale-110 backdrop-blur-sm"
-                  aria-label="الصورة السابقة"
+                  aria-label="السابق"
                 >
                   <ChevronLeft size={28} />
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); nextImage(); }}
+                  onClick={(e) => { e.stopPropagation(); nextMedia(); }}
                   className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-4 rounded-full transition-all hover:scale-110 backdrop-blur-sm"
-                  aria-label="الصورة التالية"
+                  aria-label="التالي"
                 >
                   <ChevronRight size={28} />
                 </button>
@@ -1574,7 +1887,7 @@ export default function PackageByIdClient() {
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 text-white text-sm px-4 py-2 rounded-full backdrop-blur-sm flex items-center gap-4">
               <span>{venueName}</span>
               <span className="w-px h-4 bg-white/30"></span>
-              <span>{safeImageIndex + 1} / {images.length}</span>
+              <span>{safeMediaIndex + 1} / {totalMedia}</span>
             </div>
           </div>
         </div>
